@@ -1,31 +1,38 @@
-# 大促公开信号日更 · 公开存证
+# 大促公开信号存证 · Director-Level Dual-Track
 
-Walk-forward 公开代理日更存证仓（非成交/非站内私有数据）。
+公开代理≠销量/GMV；T0预测与freeze/T0原分数不变。
 
-## 边界
+- `daily/`：11/03–11/06已重绘，含完整UTC桶、跨平台明细和T0 vs Live五维排名。
+- `reports/`：同一Markdown源渲染PDF，颗粒度一致，中文/English独立列。
+- `engine/`：本窗本地可复用的采集/迁移/五维评分/导出/冻结/回测源代码与配置。运行时根目录为/workspace/dacu-signal。
+- `freeze/T0_2026-11-02_top9.md`：原软冻结基准。11/08才运行T1硬冻结，未提前生成。
 
-- 只存**公开代理**：公开帖量、内容热度代理、日历锚点、四维打分与动作建议。
-- **不编造 GMV / 成交 / 站内私有数据**。
-- `is_partial=1` 表示当日 UTC/采集窗未完。
-- 已冻结预测 `T0_2026-11-02_top9`（soft）**禁止改预测字段**；规则变更只能新开 `freeze_id`。
-- 回测 actual 侧只用事后可复核的公开代理。
+## Director-Level Dual-Track（schema v5 / director_v1）
+T0 `prediction_*` 与 freeze/T0 数字不变。T0 原四维 /20，Live 五维 /25，**不能把分差解释为同比提升**；只比较 Rank_Delta（T0_Rank − Rolling_Rank）。
 
-## Dual-Track（自 2026-11-03 起）
+每日五维各 clamp(0,5)，保留1位；Live_Rolling_Score = D+C+F+M+W+catalyst_adj。
+- x = 0.6*tanh(X_DoD/50) + 0.4*tanh(X_slope_7d/8)。不足7日用已知连续序列并披露窗口；缺值贡献为中性但不是0帖量。
+- 对 TT/YT/Google 近7日、已发布、非partial **日频**动量 z = .6*tanh(DoD/50)+.4*tanh(slope/max(.1*value,1))。c = 已有平台z均值。至少2个平台 z>0.15（含X）才共振。单平台正X脉冲系数a=.35，否则a=1。
+- D=clamp(2.5+1.4*a*x+c+0.4*I(共振))。月度Newsroom仅背景，不充当11月日频共振。
+- C=clamp(2.5+.7*(visual_hook-.5)+.8*ad_z)。ad_z为可用Meta/TT日频动量均值；缺广告数据回归保守中值+设计先验，非实测转化率。
+- t=距配置中最近未来活动节点天数；h=max(0,(lead_days+3-t)/(lead_days+3))。
+- F=clamp(4.5+(.5 if US现货验证 else -.4)-.5*bulky-1.8*h*(非US现货)-.5*size_risk)。当前无SKU美仓验证，均false；lead为情景假设。
+- M=clamp(3+.8*bundle+.6*repeat-1.5*return_risk-.7*size_risk-.8*fragile-1.2*IP-.8*Reddit_complaint_share)。未知Reddit不等于无差评；风险、毛利、连带、仓储参数均**分析师先验**而非实测财务数据。
+- W=clamp(3.5+1.2*differentiation-2*brand_concentration-1.2*IP-.4*max(0,ad_z))。
+- catalyst_adj 可选，默认0。仅 `--with-catalysts` 且文件as_of等于报告日启用；每条权重限[-1,1]，合计限±2，非机器观测，不自动依赖其他窗口。
+- 同分以T0原Rank稳定排序。Live总分如使用催化理论[-2,27]，五维自身各0–5。
 
-- **Track A / T0**：`freeze/T0_2026-11-02_top9.md` 分数与排名为 12/01 回测标尺（勿改）。
-- **Track B / Live Rolling**：`daily/YYYY-MM-DD.md` 含 `Rolling_Score / Rolling_Rank / Rank_Delta`，由完整日桶 DoD% + slope_7d + 履约时间衰减 + `external_catalysts.json` 合成。
-- 每日 MD 同时包含 **昨日完整日桶主表**（完整值 / DoD% / slope_7d）与当日 partial 表。
-- 日历锚点 **Black_Friday = 2026-11-27**（感恩节 11/26 次日周五）。
-- Hard Freeze 11/08–11/09：T1 应从最新 Rolling 排名另开 freeze，禁止改 T0。
+### 采集与边界
+`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口；原始公开响应位于data/platform_raw。缺测不编量，不从搜索结果条数推断平台总量。TikTok月度背景保留真实期间，不能伪造11/03–11/06日频。Meta/IG/YT/Trends公开动态页未给时序就NULL。Reddit仅公开列表完整覆盖UTC日时使用词法差评样本；非退货率。
 
-## 目录
+### 入口与日历
+`python3 scripts/run_daily_pipeline.py --as-of YYYY-MM-DD --x-input data/x_YYYY-MM-DD.json`
+原有X查询由本窗原生X connector取得，导出为数组：metric_key,signal_date,value,is_partial,source_note,as_of_ts。必须含昨日完整日及至少7日历史、今日partial。入口不读取token、不复制旧值；无X输入且无当日已有run则明确缺测。
+配置：config/retail_calendar.json、config/watch_topics.json。黑五=2026-11-27。圣诞清仓/情人节只需更新节点、词池及SKU先验；引擎无需改日期。工作台仅只读。
 
-- `daily/YYYY-MM-DD.md` — 每日公开信号快照 + 双轨 Top9（Git 提交时间即时间戳）
-- `freeze/T0_2026-11-02_top9.md` — 软冻结 Top9 基线（只读存证）
+### Walk-forward
+11/08生成不可变Live T1；提前执行只dry-run；缺当日9个director_v1排名或完整X桶则不冻结。11/12、12/01执行backfill_actuals，只读真实完整UTC日桶，先回填actuals_daily/actuals_sku_window再计算**相对冻结前7日均值的日均增长**排名Spearman与rank MAE；不是销量/GMV。样本或窗口不足保持pending；并列用平均秩。
+后续校准需积累多个独立窗口后再调参数；本版不在无actual时自动优化（避免泄漏/过拟合）。
 
-## 账户与用途
-
-- GitHub：`leeren11/dacu-public-signals`（公开）
-- 用途：作品集 walk-forward 时间戳；方法由人讲，工具加速取数
-
-生成于 2026-11-06 Asia/Shanghai（Dual-Track 升级后重渲）。
+## 当前缺测边界
+X完整日桶可用；TikTok六条官方月度背景可核查，但不能当作11月日频共振。其余公开日频源暂缺（见日报NULL与HTTP状态）。风险/毛利/退货/仓储参数均先验，未验证美仓，不承诺3-Day Delivery；当前只宜轻测，不宜据代理分数重仓。

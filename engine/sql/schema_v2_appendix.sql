@@ -1,0 +1,4 @@
+-- Appendix to schema.sql (v2). Applied by scripts/freeze_top9_2026-11-02.py
+-- See migrate_v2_prediction_freeze.sql for full DDL.
+-- New objects: prediction_freeze, prediction_items, actuals_daily,
+--              actuals_sku_window, enhanced backtest_logs, v_prediction_vs_actual
