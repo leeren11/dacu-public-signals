@@ -1,0 +1,29 @@
+{
+  "season": "holiday_2026",
+  "anchors": {
+    "TTS_BFCM_window_start": "2026-11-11",
+    "Thanksgiving": "2026-11-26",
+    "Black_Friday": "2026-11-27",
+    "Cyber_Monday": "2026-11-30",
+    "Christmas": "2026-12-25"
+  },
+  "fulfillment_anchors": [
+    "TTS_BFCM_window_start",
+    "Black_Friday",
+    "Christmas"
+  ],
+  "freeze": {
+    "T1": "2026-11-08"
+  },
+  "evaluations": {
+    "2026-11-12": {
+      "start": "2026-11-11",
+      "end": "2026-11-11"
+    },
+    "2026-12-01": {
+      "start": "2026-11-11",
+      "end": "2026-11-30"
+    }
+  },
+  "season_switch_note": "After Cyber Monday set fulfillment_anchors to Christmas; December clearance can add Clearance=2026-12-26; February set Valentine=2027-02-14. Add matching watch_topics without editing engine."
+}
