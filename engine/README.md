@@ -26,7 +26,7 @@ T0 `prediction_*` 与 freeze/T0 数字不变。T0 原四维 /20，Live 五维 /2
 配置：config/retail_calendar.json、config/watch_topics.json。黑五=2026-11-27。圣诞清仓/情人节只需更新节点、词池及SKU先验；引擎无需改日期。工作台仅只读。
 
 ### Walk-forward
-11/08生成不可变Live T1；提前执行只dry-run；缺当日9个director_v1排名或完整X桶则不冻结。11/12、12/01执行backfill_actuals，只读真实完整UTC日桶，先回填actuals_daily/actuals_sku_window再计算**相对冻结前7日均值的日均增长**排名Spearman与rank MAE；不是销量/GMV。样本或窗口不足保持pending；并列用平均秩。
+11/08生成不可变Live T1；提前执行只dry-run；缺当日9个director_v1排名或完整X桶则不冻结。11/12、12/01先执行 `backfill_actuals.evaluate`，再导出日更。evaluate 只读真实完整 UTC 日桶，先回填 actuals，再计算**相对冻结前 7 日日均的增长**以及 Spearman / rank MAE。人类读 `walk-forward/walkforward_YYYY-MM-DD.md`：冻结时的秩/动作/分数、基线对评估窗的逐日爬坡、已入库的其他平台行、以及测款/预热/观望是否还站得住。JSON 保存同一内容和 `climb.series`。公开帖量代理，不是销量或 GMV，不写准确率。窗口不齐就 pending。建议提交说明：`walkforward: YYYY-MM-DD`。
 后续校准需积累多个独立窗口后再调参数；本版不在无actual时自动优化（避免泄漏/过拟合）。
 
 ## 运行与验证
@@ -35,6 +35,7 @@ T0 `prediction_*` 与 freeze/T0 数字不变。T0 原四维 /20，Live 五维 /2
 - `python3 scripts/freeze_T1_hard.py --dry-run`
 - 输出MD：`/workspace/dacu-public-signals-stamp/daily/YYYY-MM-DD.md`
 - 输出PDF：`reports/dacu_daily_YYYY-MM-DD.pdf`，并复制至stamp/reports/便于同次发布。
+- 评估日额外输出：`/workspace/dacu-public-signals-stamp/walk-forward/walkforward_YYYY-MM-DD.md` 与 `.json`（逐日爬坡 + 冻结对照），并写一份到运行时 `reports/`。流水线在导出日更之前执行 evaluate。本地脚本仍不 push。
 - 不运行旧daily_scheduled_2026-*作为未来入口；它们仅历史迁移归档，包含静态T0复制逻辑。
 - `external_catalysts.json`非依赖，默认不启用；无需其他窗口写入。
 - SQLite迁移前快照：db/pre_director_v5.sqlite；T0核验：data/pre_director_t0_snapshot.json。备份/原始网页**不要推公开库**。

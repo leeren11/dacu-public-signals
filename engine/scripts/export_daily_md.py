@@ -66,11 +66,15 @@ def report(as_of,recompute=True):
     catalog={r['sku_cluster']:r['parent_category'] for r in con.execute('select sku_cluster,parent_category from sku_catalog')}
     cats={catalog.get(r['sku_cluster'],'Other') for r in rolling}
     cols=['multi_platform_demand','content_ad_leverage','fulfillment_sla','margin_return_risk','white_label_viability','live_total']
-    out+=['## 类目Live五维（所属SKU等权均值，不再复制T0）','',table(['类目','需求D','内容C','履约F','风险M','白牌W','Live均分'],[(c,*[num(sum(r[k] for r in rolling if catalog.get(r['sku_cluster'],'Other')==c)/sum(catalog.get(r['sku_cluster'],'Other')==c for r in rolling)) for k in cols]) for c in sorted(cats)]),'','## 评分可审计说明','']
+    out+=['## 类目Live五维（所属SKU等权均值，不再复制T0）','',table(['类目','需求D','内容C','履约F','风险M','白牌W','Live均分'],[(c,*[num(sum(r[k] for r in rolling if catalog.get(r['sku_cluster'],'Other')==c)/sum(catalog.get(r['sku_cluster'],'Other')==c for r in rolling)) for k in cols]) for c in sorted(cats)]),'']
+    from export_walkforward import daily_section
+    wf=daily_section(as_of,STAMP/'walk-forward',con)
+    if wf:out+=['',wf,'']
+    out+=['## 评分可审计说明','']
     for r in rolling:
         _n=r['formula_note']
         out.append('- '+r['zh_name']+': '+(_n if len(_n)<=280 else _n[:277]+'...'))
-    out+=['','## 冻结与回测','- T0：freeze/T0_2026-11-02_top9.md，原分数/排名/预测字段不修改。','- T1：11/08基于当日最新director_v1滚动排名硬冻结；提前执行只dry-run；一旦生成不可覆盖。','- 11/12与12/01：完整日桶回填actuals与Spearman/rank MAE；没有完整窗口就pending，不编actual。','- 先验尚未以多窗口actual自校准；现阶段仅建议低预算轻测，不据代理帖量重仓。','']
+    out+=['','## 冻结与回测','- T0：freeze/T0_2026-11-02_top9.md，原分数/排名/预测字段不修改。','- T1：11/08基于当日最新director_v1滚动排名硬冻结；提前执行只dry-run；一旦生成不可覆盖。','- 11/12与12/01：先 evaluate 再导出。逐日爬坡、冻结动作与公开对照写入 walk-forward/walkforward_<评估日>.md；没有完整窗口就 pending，不编 actual。','- 先验尚未以多窗口actual自校准；现阶段仅建议低预算轻测，不据代理帖量重仓。','']
     con.close();return '\n'.join(out)
 def export_one(as_of,out_dir=STAMP/'daily',recompute=True):
     text=report(as_of,recompute);out_dir=Path(out_dir);out_dir.mkdir(parents=True,exist_ok=True);path=out_dir/f'{as_of}.md';path.write_text(text);print(f'[md] {path}');return path
