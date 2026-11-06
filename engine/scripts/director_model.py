@@ -9,6 +9,26 @@ from display_names import SKU_PRIMARY_METRIC,zh_name,FREEZE_ID
 def config():
     return (json.loads((ROOT/'config/retail_calendar.json').read_text()),json.loads((ROOT/'config/watch_topics.json').read_text()))
 def clip(x,low=0,high=5):return max(low,min(high,x))
+
+def fulfillment_dims(p, days):
+    """Return (raw_decay, decay_eff, F, mode). Ready-stock does not mechanically decay with countdown."""
+    lead=float(p['lead_days']); bulky=float(p.get('bulky') or 0); size=float(p.get('size_risk') or 0)
+    us=bool(p.get('us_ready_stock')); decay=max(0,(lead+3-days)/(lead+3))
+    ready=us or lead<=7
+    if ready:
+        # Scarcity of 3-Day Delivery rises as window nears; do not cut F when days>=3.
+        decay_eff=0.0 if days>=3 else 0.0
+        base=4.0+(0.2 if bulky<=0 else 0.0)+(0.2 if us else 0.0)-0.5*size
+        # Keep ready-stock F in the 3.8–4.2 band (analyst lead scenario, not verified warehouse unless us=True).
+        fulfill=round(clip(base,3.8,4.2),1)
+        return decay,decay_eff,fulfill,'ready'
+    if lead>=12:
+        decay_eff=decay
+        fulfill=round(clip(4.5+(.5 if us else -.4)-.5*bulky-2.0*decay_eff-.5*size),1)
+        return decay,decay_eff,fulfill,'long'
+    decay_eff=0.5*decay
+    fulfill=round(clip(4.5+(.5 if us else -.4)-.5*bulky-1.8*decay_eff-.5*size),1)
+    return decay,decay_eff,fulfill,'mid'
 def platform_rows(con,rid):
     return [dict(r) for r in con.execute('SELECT * FROM platform_signals WHERE run_id=? ORDER BY platform,channel,sku_cluster_or_topic',(rid,))]
 def eligible(row,sku,as_of):
@@ -26,8 +46,13 @@ def compute(con,as_of,run_id=None,catalysts_path=None,use_catalysts=False):
     positive=[n for n in anchors if n>=0];days=min(positive) if positive else 0
     bf=cal['anchors'].get('Black_Friday',cal['anchors'][cal['fulfillment_anchors'][0]])
     days_bf=(date.fromisoformat(bf)-date.fromisoformat(as_of)).days
-    catalysts=load_catalysts(catalysts_path,as_of) if use_catalysts and catalysts_path else {'catalysts':[]}
-    if catalysts.get('as_of_date')!=as_of:catalysts={'catalysts':[]}
+    catalysts={'catalysts':[]}
+    catalyst_overlay=False
+    if use_catalysts and catalysts_path:
+        catalysts=load_catalysts(catalysts_path,as_of)
+        if catalysts.get('as_of_date')!=as_of:
+            # Historical redraw: apply analyst weights as overlay without fabricating platform_signals.
+            catalyst_overlay=True
     result=[]
     for baseline in load_t0_items(con):
         it=dict(baseline);sku=it['sku_cluster'];p=watch['profiles'][sku];primary=p['primary_metric'];m=metric_map.get(primary,{})
@@ -50,19 +75,21 @@ def compute(con,as_of,run_id=None,catalysts_path=None,use_catalysts=False):
         ad=sum(normalized(r) for r in ads)/len(ads) if ads else 0
         content=round(clip(2.5+.7*(p['visual_hook']-.5)+.8*ad),1)
         # Lead-time scenario, not a warehouse claim. Nearest upcoming configured node.
-        decay=max(0,(p['lead_days']+3-days)/(p['lead_days']+3))
-        fulfill=round(clip(4.5+(.5 if p['us_ready_stock'] else -.4)-.5*p['bulky']-1.8*decay*(1-int(p['us_ready_stock']))-.5*p['size_risk']),1)
+        # Ready-stock / light SKUs (lead<=7 OR us_ready_stock): no mechanical countdown decay when
+        # days_to_anchor>=3; F stays in 3.8–4.2. Long-chain (lead>=12): strengthen decay (coeff 2.0).
+        decay,decay_eff,fulfill,f_mode=fulfillment_dims(p,days)
         reddit=[r['value'] for r in valid if r['platform']=='Reddit' and r['metric_key']=='complaint_share']
         complaint=sum(reddit)/len(reddit) if reddit else 0
         margin=round(clip(3+.8*p['bundle']+.6*p['repeat']-1.5*p['return_risk']-.7*p['size_risk']-.8*p['fragile_risk']-1.2*p['ip_risk']-.8*complaint),1)
         white=round(clip(3.5+1.2*p['differentiation']-2*p['brand_concentration']-1.2*p['ip_risk']-.4*max(0,ad)),1)
         c_adj,c_note=catalyst_adj_for_sku(sku,catalysts);c_adj=round(c_adj,1)
+        if catalyst_overlay and c_note!='none': c_note=c_note+f' [overlay file_as_of={catalysts.get("as_of_date")}→report={as_of}]'
         total=round(demand+content+fulfill+margin+white+c_adj,1)
         note=(f'director_v1; X={x:.3f}, Xweight={x_weight:.2f}, daily_resonance={consensus}, fresh_cross={momentum}; '
-              f'ads_n={len(ads)}; nearest_anchor_days={days}, lead={p["lead_days"]}, decay={decay:.3f}; '
+              f'ads_n={len(ads)}; nearest_anchor_days={days}, lead={p["lead_days"]}, decay={decay:.3f}, decay_eff={decay_eff:.3f}, f_mode={f_mode}; '
               f'risk/warehouse/visual priors=analyst assumptions; Reddit_n={len(reddit)}; catalyst={c_note}; '
               'missing platforms are unknown, not zero; monthly context excluded')
-        row=RollingRow(sku_cluster=sku,zh_name=zh_name(sku),t0_rank=it['rank_in_list'],t0_urgency=it['predicted_urgency'],t0_demand=it['predicted_demand'],t0_content=it['predicted_content'],t0_fulfill=it['predicted_fulfill'],t0_total=it['predicted_total'],rolling_urgency=0,rolling_demand=demand,rolling_content=content,rolling_fulfill=fulfill,catalyst_adj=c_adj,rolling_total=total,rolling_rank=0,rank_delta=0,demand_adj=round(demand-2.5,1),fulfill_adj=round(-1.8*decay,1),primary_metric=primary,dod_pct=m.get('dod_pct'),slope_7d=m.get('slope_7d'),consec_hot_days=m.get('consec_hot_days',0),action_note='仅轻测；缺多平台日频共振/真实毛利验证，禁止据代理热度重仓。',formula_note=note,predicted_action=it['predicted_action'],multi_platform_demand=demand,content_ad_leverage=content,fulfillment_sla=fulfill,margin_return_risk=margin,white_label_viability=white,live_total=total)
+        row=RollingRow(sku_cluster=sku,zh_name=zh_name(sku),t0_rank=it['rank_in_list'],t0_urgency=it['predicted_urgency'],t0_demand=it['predicted_demand'],t0_content=it['predicted_content'],t0_fulfill=it['predicted_fulfill'],t0_total=it['predicted_total'],rolling_urgency=0,rolling_demand=demand,rolling_content=content,rolling_fulfill=fulfill,catalyst_adj=c_adj,rolling_total=total,rolling_rank=0,rank_delta=0,demand_adj=round(demand-2.5,1),fulfill_adj=round(-2.0*decay_eff if f_mode=='long' else (-1.8*decay_eff if f_mode=='mid' else 0.0),1),primary_metric=primary,dod_pct=m.get('dod_pct'),slope_7d=m.get('slope_7d'),consec_hot_days=m.get('consec_hot_days',0),action_note='仅轻测；缺多平台日频共振/真实毛利验证，禁止据代理热度重仓。',formula_note=note,predicted_action=it['predicted_action'],multi_platform_demand=demand,content_ad_leverage=content,fulfillment_sla=fulfill,margin_return_risk=margin,white_label_viability=white,live_total=total)
         result.append(row)
     result.sort(key=lambda r:(-r.live_total,r.t0_rank))
     for rank,row in enumerate(result,1):row.rolling_rank=rank;row.rank_delta=row.t0_rank-rank
@@ -78,19 +105,18 @@ T0 `prediction_*` 与 freeze/T0 数字不变。T0 原四维 /20，Live 五维 /2
 - D=clamp(2.5+1.4*a*x+c+0.4*I(共振))。月度Newsroom仅背景，不充当11月日频共振。
 - C=clamp(2.5+.7*(visual_hook-.5)+.8*ad_z)。ad_z为可用Meta/TT日频动量均值；缺广告数据回归保守中值+设计先验，非实测转化率。
 - t=距配置中最近未来活动节点天数；h=max(0,(lead_days+3-t)/(lead_days+3))。
-- F=clamp(4.5+(.5 if US现货验证 else -.4)-.5*bulky-1.8*h*(非US现货)-.5*size_risk)。当前无SKU美仓验证，均false；lead为情景假设。
+- F 分档：`lead<=7` 或 `us_ready_stock` → 美仓/轻小现货情景，t≥3 时 decay_eff=0，F=clamp(4.0+0.2*(非体积重)+0.2*(已验证美仓)-0.5*size_risk, 3.8, 4.2)，不随倒计时阴跌；`lead>=12` 长链路/尺码/体积重 → F=clamp(4.5+(.5 if 美仓验证 else -.4)-.5*bulky-2.0*h-.5*size_risk)；中间带半强度 1.8*0.5*h。当前无SKU美仓验证（us_ready_stock=false），lead为情景假设，不是已核实仓储声明。
 - M=clamp(3+.8*bundle+.6*repeat-1.5*return_risk-.7*size_risk-.8*fragile-1.2*IP-.8*Reddit_complaint_share)。未知Reddit不等于无差评；风险、毛利、连带、仓储参数均**分析师先验**而非实测财务数据。
 - W=clamp(3.5+1.2*differentiation-2*brand_concentration-1.2*IP-.4*max(0,ad_z))。
-- catalyst_adj 可选，默认0。仅 `--with-catalysts` 且文件as_of等于报告日启用；每条权重限[-1,1]，合计限±2，非机器观测，不自动依赖其他窗口。
+- catalyst_adj 可选，默认0。`--with-catalysts` 启用：报告日等于文件 as_of 时正常注入；历史重绘（as_of 不同）允许权重 overlay，不伪造过去跨平台日桶。每条权重限[-1,1]，合计限±2，非机器观测。
 - 同分以T0原Rank稳定排序。Live总分如使用催化理论[-2,27]，五维自身各0–5。
-- 共振是条件规则，不是当前实测：其他平台日频为NULL时不参与。当前不声称多平台日频共振已上线；X是主信号。
 
 ### 采集与边界
-`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口。本公开仓库不含原始HTML/JSON抓取转储。X计数JSON由操作者在运行时提供（本机示例 `db/x_counts_YYYY-MM-DD.json`），不随本库发布。缺测不编量，不从搜索结果条数推断平台总量。X是主信号。TikTok月度背景保留真实期间，不能伪造11/03–11/06日频，也不充当日频共振。Meta/IG/YT/Trends公开动态页未给时序就NULL。Reddit仅公开列表完整覆盖UTC日时使用词法差评样本；非退货率。其他平台日频可以是NULL。
+`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口；原始公开响应位于data/platform_raw（缓存于data/platform_cache，浏览器画像于data/browser_profile，均不入库）。采集走 Playwright 持久化 Chromium + curl_cffi chrome124 拟人节流，禁止裸 requests 抓目标页。缺测不编量。TikTok月度背景保留真实期间，不能伪造历史日频。Meta/IG/YT/Trends 拦截失败或无时序就NULL。Reddit 公开 JSON/RSS（合规 UA）覆盖UTC日时用词法差评样本；非退货率。
 
 ### 入口与日历
-唯一入口：`python3 scripts/run_daily_pipeline.py --as-of YYYY-MM-DD --x-input <操作者提供的X JSON>`
-X计数由操作者取得后作为输入路径传入，不入库。本机示例：`db/x_counts_YYYY-MM-DD.json`。内容为数组，或原生connector的parsed_detail导出，字段含metric_key,signal_date,value,is_partial,source_note,as_of_ts。必须含昨日完整日及至少7日历史、今日partial。入口不读取token、不复制旧值；无X输入且无当日已有run则明确缺测。
+`python3 scripts/run_daily_pipeline.py --as-of YYYY-MM-DD --x-input data/x_YYYY-MM-DD.json`
+原有X查询由本窗原生X connector取得，导出为数组：metric_key,signal_date,value,is_partial,source_note,as_of_ts。必须含昨日完整日及至少7日历史、今日partial。入口不读取token、不复制旧值；无X输入且无当日已有run则明确缺测。
 配置：config/retail_calendar.json、config/watch_topics.json。黑五=2026-11-27。圣诞清仓/情人节只需更新节点、词池及SKU先验；引擎无需改日期。工作台仅只读。
 
 ### Walk-forward

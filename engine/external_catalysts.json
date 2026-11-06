@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-06T13:42:14+08:00",
+  "as_of_date": "2026-11-06",
+  "note": "仅公开代理；weight为分析师保守外源修正，不是增长率/概率/GMV。月度旧信号降权；未证实外源为0；X DoD已由demand_adj计入，勿再次解释为新增X加分。as_of_date为11/06，仅供Live Rolling；T1为预案、不创建冻结。",
+  "catalysts": [
+    {
+      "source": "TikTok_Newsroom",
+      "sku_cluster_or_category": "pjs",
+      "weight": 0.6,
+      "note": "X泛时尚11/05完整桶212，DoD -23.74%、7日斜率-1.50；官方#christmaspajamas 8→9月内容+297%。符合垂直节日睡衣相对强势假说，但非11月增速、不能证明跨平台流量迁移；仅现货轻测+内容上调。",
+      "evidence_urls": [
+        "https://newsroom.tiktok.com/whats-shaping-the-holiday-season-on-tiktok-shop?lang=en"
+      ],
+      "evidence_window": "2026年8月至9月月环比；11/11–11/30活动日历"
+    },
+    {
+      "source": "TikTok_Newsroom",
+      "sku_cluster_or_category": "holiday press-on",
+      "weight": 0.4,
+      "note": "X甲妆11/05完整桶153，DoD +24.39%、斜率+7.75；官方fall nails/inspo 8→9月搜索+333%/+251%。跨源支持节日甲片加速测款；不是甲片当周销量，使用不含nail别名的SKU子串holiday press-on，避免匹配器将甲片催化误加给唇膏。",
+      "evidence_urls": [
+        "https://newsroom.tiktok.com/whats-shaping-the-holiday-season-on-tiktok-shop?lang=en"
+      ],
+      "evidence_window": "2026年8月至9月月环比"
+    },
+    {
+      "source": "TikTok_Newsroom",
+      "sku_cluster_or_category": "jewelry",
+      "weight": 0.3,
+      "note": "X珠宝11/05完整桶259，DoD -15.08%、斜率+1.71；官方9月gold jewelry/opal rings搜索月增+1134%/+825%、friendshipbracelet +120%。中期礼赠支撑但短期回撤，四簇维持测款、不追量。",
+      "evidence_urls": [
+        "https://newsroom.tiktok.com/whats-shaping-the-holiday-season-on-tiktok-shop?lang=en"
+      ],
+      "evidence_window": "2026年9月搜索月环比"
+    },
+    {
+      "source": "TikTok_Newsroom",
+      "sku_cluster_or_category": "squishy",
+      "weight": 0.15,
+      "note": "X混合squishy/plush/collectible桶178，DoD +87.37%、斜率+8.00；官方9月squishy toys搜索+149%仅作方向验证。混桶脉冲未证实为单SKU需求，低体积重无IP多件装轻测，禁止据此重仓。",
+      "evidence_urls": [
+        "https://newsroom.tiktok.com/whats-shaping-the-holiday-season-on-tiktok-shop?lang=en"
+      ],
+      "evidence_window": "2026年9月搜索月环比"
+    },
+    {
+      "source": "TikTok_Newsroom",
+      "sku_cluster_or_category": "tts",
+      "weight": 0.15,
+      "note": "X TTS∩US/礼品假日桶103，DoD +37.33%、斜率+10.75；官方确认11/11–11/30 BFCM及礼赠发现场景。仅给外源日历/渠道确认小额分，不把月度热度当11月连续增长。",
+      "evidence_urls": [
+        "https://newsroom.tiktok.com/whats-shaping-the-holiday-season-on-tiktok-shop?lang=en"
+      ],
+      "evidence_window": "2026年11/11–11/30活动；9月内容为背景"
+    },
+    {
+      "source": "Meta",
+      "sku_cluster_or_category": "all",
+      "weight": 0.0,
+      "note": "X TTS +37.33%/斜率+10.75；Meta官方3月介绍Black Friday Reels trending ads及目录视频测试，只说明分发工具。无公开证据证明11/06本候选品类需求额外上涨，weight=0。",
+      "evidence_urls": [
+        "https://about.fb.com/br/news/2026/03/da-cultura-aos-negocios-como-a-ia-esta-impulsionando-conexoes-personalizadas-e-crescimento/"
+      ],
+      "evidence_window": "2026年3月产品公告；非11月品类需求"
+    },
+    {
+      "source": "IG_Threads",
+      "sku_cluster_or_category": "all",
+      "weight": 0.0,
+      "note": "X泛时尚-23.74%/斜率-1.50；公开可读Sephora IG礼赠帖实际为2021/12/13，已剔除；Threads未找到可复核的当期类目趋势。无公开证据，weight=0，不用旧帖或平台总使用量补数。",
+      "evidence_urls": [
+        "https://www.instagram.com/sephora/reel/CXbzOV3lJWm/"
+      ],
+      "evidence_window": "旧IG帖已剔除；2026年11月趋势未证实"
+    },
+    {
+      "source": "competitor_early_promo",
+      "sku_cluster_or_category": "lip butter gift set",
+      "weight": -0.2,
+      "note": "X甲妆+24.39%/斜率+7.75仅混合代理；Sephora官方10/30–11/09分层折扣10%–20%、自有系列30%，GMA 2026/11/03报道交叉定年。唇礼盒面临品牌促销竞争，谨慎-0.20为分析师风险折扣，非已证实销量流失。",
+      "evidence_urls": [
+        "https://www.sephora.com/beauty/savings-event-faqs",
+        "https://www.goodmorningamerica.com/shop/story/sephora-savings-event-2026-137783077"
+      ],
+      "evidence_window": "官方页未显年；2026/11/03报道佐证本期促销"
+    },
+    {
+      "source": "competitor_early_promo",
+      "sku_cluster_or_category": "pjs",
+      "weight": 0.0,
+      "note": "X泛时尚-23.74%/斜率-1.50；VS公开sale页能读到睡衣常规清仓，但未确认当期BFCM日期或家庭法兰绒同款促销。无公开证据支持额外节日催化，weight=0。",
+      "evidence_urls": [
+        "https://www.victoriassecret.com/us/vs/sale"
+      ],
+      "evidence_window": "抓取时可见常规清仓；非已确认2026 BFCM活动"
+    },
+    {
+      "source": "TikTok_Newsroom",
+      "sku_cluster_or_category": "knit",
+      "weight": 0.0,
+      "note": "X泛时尚-23.74%/斜率-1.50；官方睡衣+297%不能外推燕麦色粗针毛衣。无公开证据支持该细分催化，weight=0；X需求回撤由rolling需求项处理，不重复外源扣分。",
+      "evidence_urls": [
+        "https://newsroom.tiktok.com/whats-shaping-the-holiday-season-on-tiktok-shop?lang=en"
+      ],
+      "evidence_window": "未找到knit专属当期公开证据"
+    }
+  ]
+}

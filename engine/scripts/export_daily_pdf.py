@@ -192,14 +192,24 @@ def render_markdown_pdf(md_path, out_path):
     for st in styles.values():
         st.wordWrap='CJK'
         st.splitLongWords=True
-    styles['cell'].fontSize=6.2;styles['cell'].leading=8.4
+    styles['cell'].fontSize=5.6;styles['cell'].leading=7.2;styles['body'].fontSize=7;styles['body'].leading=9;styles['h2'].fontSize=9;styles['h2'].leading=11;styles['h2'].spaceBefore=1.2*mm;styles['h2'].spaceAfter=0.6*mm;styles['title'].fontSize=11;styles['title'].leading=14
     width=277*mm
     story=[]
     def clean(text):
         return escape(text.replace('**','').replace('`',''))
     def para(text,kind='body'):
         return Paragraph(clean(text),styles[kind])
-    lines=Path(md_path).read_text().splitlines();i=0
+    raw=Path(md_path).read_text().splitlines()
+    # Dense PDF: keep signal/rank tables; drop long per-SKU audit + freeze appendix (still in MD).
+    lines=[];skip=False
+    for line in raw:
+        if line.startswith('## 评分可审计说明') or line.startswith('## 冻结与回测'):
+            skip=True; continue
+        if skip and line.startswith('## '):
+            skip=False
+        if skip: continue
+        lines.append(line)
+    i=0
     while i<len(lines):
         line=lines[i]
         if line.startswith('|'):
@@ -214,15 +224,15 @@ def render_markdown_pdf(md_path, out_path):
                 elif any(k in h for k in ('窗口','平台','日期','中文')):weights[j]=1.7
             widths=[width*w/sum(weights) for w in weights]
             data=[[para(c,'cell') for c in row] for row in rows]
-            t=LongTable(data,colWidths=widths,repeatRows=1,hAlign='LEFT');t.setStyle(table_style(font));story.append(t);story.append(Spacer(1,2*mm));continue
+            t=LongTable(data,colWidths=widths,repeatRows=1,hAlign='LEFT');t.setStyle(table_style(font));story.append(t);story.append(Spacer(1,1*mm));continue
         if line.startswith('# '):story.append(para(line[2:],'title'))
         elif line.startswith('## '):story.append(para(line[3:],'h2'))
         elif line.startswith('### '):story.append(para(line[4:],'h2'))
         elif line.strip():story.append(para(line))
-        else:story.append(Spacer(1,1.4*mm))
+        else:story.append(Spacer(1,0.6*mm))
         i+=1
     Path(out_path).parent.mkdir(parents=True,exist_ok=True)
-    doc=SimpleDocTemplate(str(out_path),pagesize=landscape(A4),leftMargin=10*mm,rightMargin=10*mm,topMargin=10*mm,bottomMargin=10*mm,title='Director-v1 Dual-Track Public Signals',author='黎治工作')
+    doc=SimpleDocTemplate(str(out_path),pagesize=landscape(A4),leftMargin=8*mm,rightMargin=8*mm,topMargin=7*mm,bottomMargin=8*mm,title='Director-v1 Dual-Track Public Signals',author='黎治工作')
     def footer(canvas,doc):
         canvas.setFont(font,7);canvas.drawString(10*mm,5*mm,f'director_v1 / Asia/Shanghai / page {doc.page} / public proxies, not GMV')
     doc.build(story,onFirstPage=footer,onLaterPages=footer)

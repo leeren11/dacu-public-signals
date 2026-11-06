@@ -1,6 +1,6 @@
 -- dacu-signal schema v2: prediction freeze + future actuals + backtest scaffolding
 -- Asia/Shanghai; public-proxy only; never invent GMV.
--- Idempotent (IF NOT EXISTS / guarded ALTER).
+-- Idempotent when applied via freeze_top9 script (IF NOT EXISTS / guarded ALTER).
 
 PRAGMA foreign_keys = ON;
 
