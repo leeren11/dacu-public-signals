@@ -1,5 +1,0 @@
--- Applied via scripts/add_timing_T0_2026-11-02.py
--- See migrate_v3_prediction_timing.sql for full DDL.
--- Tables: prediction_timing, prediction_checkpoints, checkpoint_actuals
--- Views: v_timing_backtest, v_timing_summary
--- backtest_logs gains: timing_hit, timing_notes (NULL until eval)

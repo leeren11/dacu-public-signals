@@ -83,13 +83,14 @@ T0 `prediction_*` 与 freeze/T0 数字不变。T0 原四维 /20，Live 五维 /2
 - W=clamp(3.5+1.2*differentiation-2*brand_concentration-1.2*IP-.4*max(0,ad_z))。
 - catalyst_adj 可选，默认0。仅 `--with-catalysts` 且文件as_of等于报告日启用；每条权重限[-1,1]，合计限±2，非机器观测，不自动依赖其他窗口。
 - 同分以T0原Rank稳定排序。Live总分如使用催化理论[-2,27]，五维自身各0–5。
+- 共振是条件规则，不是当前实测：其他平台日频为NULL时不参与。当前不声称多平台日频共振已上线；X是主信号。
 
 ### 采集与边界
-`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口；原始公开响应位于data/platform_raw。缺测不编量，不从搜索结果条数推断平台总量。TikTok月度背景保留真实期间，不能伪造11/03–11/06日频。Meta/IG/YT/Trends公开动态页未给时序就NULL。Reddit仅公开列表完整覆盖UTC日时使用词法差评样本；非退货率。
+`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口。本公开仓库不含原始HTML/JSON抓取转储。X计数JSON由操作者在运行时提供（本机示例 `db/x_counts_YYYY-MM-DD.json`），不随本库发布。缺测不编量，不从搜索结果条数推断平台总量。X是主信号。TikTok月度背景保留真实期间，不能伪造11/03–11/06日频，也不充当日频共振。Meta/IG/YT/Trends公开动态页未给时序就NULL。Reddit仅公开列表完整覆盖UTC日时使用词法差评样本；非退货率。其他平台日频可以是NULL。
 
 ### 入口与日历
-`python3 scripts/run_daily_pipeline.py --as-of YYYY-MM-DD --x-input data/x_YYYY-MM-DD.json`
-原有X查询由本窗原生X connector取得，导出为数组：metric_key,signal_date,value,is_partial,source_note,as_of_ts。必须含昨日完整日及至少7日历史、今日partial。入口不读取token、不复制旧值；无X输入且无当日已有run则明确缺测。
+唯一入口：`python3 scripts/run_daily_pipeline.py --as-of YYYY-MM-DD --x-input <操作者提供的X JSON>`
+X计数由操作者取得后作为输入路径传入，不入库。本机示例：`db/x_counts_YYYY-MM-DD.json`。内容为数组，或原生connector的parsed_detail导出，字段含metric_key,signal_date,value,is_partial,source_note,as_of_ts。必须含昨日完整日及至少7日历史、今日partial。入口不读取token、不复制旧值；无X输入且无当日已有run则明确缺测。
 配置：config/retail_calendar.json、config/watch_topics.json。黑五=2026-11-27。圣诞清仓/情人节只需更新节点、词池及SKU先验；引擎无需改日期。工作台仅只读。
 
 ### Walk-forward

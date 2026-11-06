@@ -143,12 +143,12 @@ CREATE INDEX IF NOT EXISTS idx_backtest_freeze ON backtest_logs(freeze_id, as_of
 
 
 -- === v2 prediction freeze / actuals (see migrate_v2_prediction_freeze.sql) ===
--- Greenfield installs should also run migrate_v2 + freeze script, OR apply the DDL below
+-- Greenfield installs: apply migrate_v2_prediction_freeze.sql, OR apply the DDL below
 -- then rename backtest_logs_v2 → backtest_logs after dropping empty legacy backtest_logs.
 
 -- dacu-signal schema v2: prediction freeze + future actuals + backtest scaffolding
 -- Asia/Shanghai; public-proxy only; never invent GMV.
--- Idempotent when applied via freeze_top9 script (IF NOT EXISTS / guarded ALTER).
+-- Idempotent (IF NOT EXISTS / guarded ALTER).
 
 PRAGMA foreign_keys = ON;
 
