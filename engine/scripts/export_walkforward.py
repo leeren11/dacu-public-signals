@@ -1080,6 +1080,8 @@ def fetch_platform_rows(con, sku, start, end, evaluation_date):
             status = "pending"
         elif status_raw == "context":
             status = "context"
+        elif status_raw == "snapshot":
+            status = "snapshot"
         else:
             status = "observed"
         out.append(

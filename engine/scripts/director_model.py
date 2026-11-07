@@ -112,7 +112,7 @@ T0 `prediction_*` 与 freeze/T0 数字不变。T0 原四维 /20，Live 五维 /2
 - 同分以T0原Rank稳定排序。Live总分如使用催化理论[-2,27]，五维自身各0–5。
 
 ### 采集与边界
-`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口；原始公开响应位于data/platform_raw（缓存于data/platform_cache，浏览器画像于data/browser_profile，均不入库）。采集走 Playwright 持久化 Chromium + curl_cffi chrome124 拟人节流，禁止裸 requests 抓目标页。缺测不编量。TikTok月度背景保留真实期间，不能伪造历史日频。Meta/IG/YT/Trends 拦截失败或无时序就NULL。Reddit 公开 JSON/RSS（合规 UA）覆盖UTC日时用词法差评样本；非退货率。
+`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口；原始公开响应位于data/platform_raw（缓存于data/platform_cache，浏览器画像于data/browser_profile，均不入库）。采集走 Playwright 持久化 Chromium + curl_cffi chrome124 拟人节流，禁止裸 requests 抓目标页。同步 Playwright 在独立线程执行，避免 asyncio loop。缺浏览器可执行文件时安装一次 chromium 与 chromium-headless-shell，失败则该平台 NULL，不中断流水线。缺测不编量。TikTok月度背景保留真实期间，不能伪造历史日频。Google Trends 按 SKU 配置词分批（最多 5 个且含锚点）映射，429 退避。YouTube 搜索样本与 Meta「christmas gifts」共享类目库存是采集日 snapshot，不进入日频共振；DoD 只比较同一定义的相邻快照。Instagram 无公开日频保持 NULL。Reddit 在 www JSON 403/429 后礼貌请求 old.reddit.com .rss，尊重 host backoff，不绕过。拦截失败或无时序就 NULL。
 
 ### 入口与日历
 `python3 scripts/run_daily_pipeline.py --as-of YYYY-MM-DD --x-input data/x_YYYY-MM-DD.json`
