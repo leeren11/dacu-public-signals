@@ -48,6 +48,39 @@ def ingest_x(con,run,input_path):
           (run['run_id'],item['signal_date'],'X',item['metric_key'],item['value'],item['source_note'],item['as_of_ts'],item['is_partial']))
     con.commit()
 
+def annotate_dod(con, rows, as_of):
+    """Fill dod_pct/slope_7d in place. Snapshots do not borrow another metric's history."""
+    from rolling_engine import metric_features, pct_change
+    for row in rows:
+        if row.get('platform')=='X' or row.get('value') is None:
+            continue
+        if row.get('status')=='snapshot':
+            prior=con.execute("""SELECT p.signal_date, p.value FROM platform_signals p JOIN runs r ON r.run_id=p.run_id
+              WHERE p.platform=? AND p.channel=? AND p.metric_key=? AND p.sku_cluster_or_topic=?
+                AND p.unit=? AND p.status='snapshot' AND p.value IS NOT NULL
+                AND p.signal_date<? AND r.as_of_date<=?
+              ORDER BY r.report_ts""",(
+                row['platform'], row['channel'], row['metric_key'], row['sku_cluster_or_topic'],
+                row['unit'], row['signal_date'], as_of)).fetchall()
+            series={}
+            for item in prior:
+                series[item['signal_date']]=item['value']
+            prev_day=(date.fromisoformat(row['signal_date'])-timedelta(days=1)).isoformat()
+            row['dod_pct']=pct_change(row['value'], series.get(prev_day)) if prev_day in series else None
+            row['slope_7d']=None
+            continue
+        if row.get('status')!='observed' or row.get('is_partial'):
+            continue
+        prior=con.execute("""SELECT p.signal_date,p.value FROM platform_signals p JOIN runs r ON r.run_id=p.run_id
+          WHERE p.platform=? AND p.channel=? AND p.metric_key=? AND p.sku_cluster_or_topic=?
+          AND p.unit=? AND p.status='observed' AND p.is_partial=0 AND p.signal_date<?
+          AND r.as_of_date<=? ORDER BY r.report_ts""",(row['platform'],row['channel'],row['metric_key'],row['sku_cluster_or_topic'],row['unit'],row['signal_date'],as_of)).fetchall()
+        series={p['signal_date']:p['value'] for p in prior}
+        series[row['signal_date']]=row['value']
+        _,dod,slope,_=metric_features(sorted(series.items()),row['signal_date'])
+        row['dod_pct']=dod
+        row['slope_7d']=slope
+
 def collect_one(as_of,x_input=None):
     # Reuse only this date's native export, never yesterday's file.
     same_day=ROOT/'db'/f'x_counts_{as_of}.json'
@@ -62,19 +95,11 @@ def collect_one(as_of,x_input=None):
     from display_names import METRIC_ORDER
     for metric in set(METRIC_ORDER)-{r['metric_key'] for r in complete}:
         rows.append(dict(signal_date=(date.fromisoformat(as_of)-timedelta(days=1)).isoformat(),platform='X',channel='complete_utc',metric_key=metric,sku_cluster_or_topic=metric,value=None,unit='posts',slope_7d=None,dod_pct=None,is_partial=0,is_proxy=0,source_url='https://docs.x.com/x-api/posts/counts/introduction',source_note='No fresh native X connector complete bucket for this run. Supply --x-input; prior run is not copied.',as_of_ts=run['report_ts'],status='missing'))
-    # Recompute per-series DoD and calendar-aware slope only from observed complete
-    # daily measurements in the SAME metric/unit/source; context never leaks in.
-    from rolling_engine import metric_features
-    for row in rows:
-        if row['platform']=='X' or row['value'] is None or row['status']!='observed' or row['is_partial']:
-            continue
-        prior=con.execute("""SELECT p.signal_date,p.value FROM platform_signals p JOIN runs r ON r.run_id=p.run_id
-          WHERE p.platform=? AND p.channel=? AND p.metric_key=? AND p.sku_cluster_or_topic=?
-          AND p.unit=? AND p.status='observed' AND p.is_partial=0 AND p.signal_date<?
-          AND r.as_of_date<=? ORDER BY r.report_ts""",(row['platform'],row['channel'],row['metric_key'],row['sku_cluster_or_topic'],row['unit'],row['signal_date'],as_of)).fetchall()
-        series={p['signal_date']:p['value'] for p in prior};series[row['signal_date']]=row['value']
-        _,dod,slope,_=metric_features(sorted(series.items()),row['signal_date'])
-        row['dod_pct']=dod;row['slope_7d']=slope
+    # Observed daily rows: DoD/slope from the same metric definition.
+    # Snapshots (YouTube sample, Meta shared inventory): DoD only vs the previous
+    # calendar day of that same snapshot definition. No slope, and never vs a
+    # different unit or an older daily-velocity row.
+    annotate_dod(con, rows, as_of)
     cols=['run_id' ,'signal_date','platform','channel','metric_key','sku_cluster_or_topic','value','unit','slope_7d','dod_pct','is_partial','is_proxy','source_url','source_note','as_of_ts','period_start','period_end','available_at','status']
     with con:
         for row in rows:

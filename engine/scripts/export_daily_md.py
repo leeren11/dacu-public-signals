@@ -11,6 +11,22 @@ def num(v,digits=1):return '—' if v is None else f'{v:.{digits}f}'
 def esc(v):return str(v if v is not None else '—').replace('|','/').replace('\n',' ')
 def table(headers,rows):
     return '\n'.join(['| '+' | '.join(headers)+' |','| '+' | '.join('---' for _ in headers)+' |']+['| '+' | '.join(esc(v) for v in row)+' |' for row in rows])
+def is_point_in_time_snapshot(row):
+    return (row or {}).get('status')=='snapshot'
+def snapshot_definition(row):
+    topic=(row or {}).get('sku_cluster_or_topic') or ''
+    unit=(row or {}).get('unit') or ''
+    note=(row or {}).get('source_note') or ''
+    if topic.startswith('shared_category:') or 'shared category inventory proxy' in note:
+        return 'shared category inventory proxy (one curve, not independent SKU observations)'
+    if (row or {}).get('platform')=='YouTube' or 'lifetime' in unit or 'sample' in unit:
+        return 'cumulative/sample snapshot (not daily views)'
+    return 'snapshot'
+def snapshot_section(signals):
+    rows=[r for r in signals if r.get('value') is not None and is_point_in_time_snapshot(r)]
+    if not rows:
+        return []
+    return ['### 样本快照（采集日窗口，不是昨日日频）','','数值是采集当时的搜索样本或类目库存，不是前一 UTC 日的日播放，也不是把同一条查询复制成多条 SKU。DoD 只在同一定义（platform、channel、metric、sku、unit）的前一自然日快照存在时有值，否则为 —。','',table(['平台/渠道','SKU或话题','采集日窗口','数值/单位','相邻快照DoD%','状态','定义'],[(r['platform']+'/'+r['channel'],r['sku_cluster_or_topic'],f"{r.get('period_start') or r['signal_date']}..{r.get('period_end') or r['signal_date']}",f"{num(r['value'])} {r['unit']}",num(r.get('dod_pct')),'snapshot'+(' / proxy' if r.get('is_proxy') else ''),snapshot_definition(r)) for r in rows]),'']
 def report(as_of,recompute=True):
     con=connect();apply_migrate_v4(con);migrate(con)
     run=pick_run(con,as_of);rid=run['run_id']
@@ -25,11 +41,14 @@ def report(as_of,recompute=True):
     if not complete:out+=['**缺口：无该run完整X桶；不是零需求。请用原生X connector抓取后重跑。**','']
     if partial:out+=['## 今日partial（is_partial=1，不参与评分）','',table(['指标','UTC日期','partial值','库内slope（仅留档）'],[(r['label'],r['signal_date'],num(r['value'],0),num(r['slope_7d'],4)) for r in partial]),'']
     out+=['## 跨平台信号摘要','',table(['平台','行数','有数值','NULL缺口','仅月度背景'],[(p,len(rs:= [r for r in signals if r['platform']==p]),sum(r['value'] is not None for r in rs),sum(r['value'] is None for r in rs),sum(r['status']=='context' for r in rs)) for p in sorted({r['platform'] for r in signals})]),'','### 跨平台明细（仅有数值行；空行已折叠）','']
-    measured=[r for r in signals if r['value'] is not None and r.get('status')!='snapshot']
+    measured=[r for r in signals if r['value'] is not None and not is_point_in_time_snapshot(r)]
+    snaps=snapshot_section(signals)
     if measured:
         out+=[table(['平台/渠道','SKU或话题','真实窗口','数值/单位','DoD%','slope_7d','状态'],[(r['platform']+'/'+r['channel'],r['sku_cluster_or_topic'],f"{r['period_start'] or r['signal_date']}..{r['period_end'] or r['signal_date']}",f"{num(r['value'])} {r['unit']}",num(r['dod_pct']),num(r['slope_7d'],4),r['status']+(' / partial' if r['is_partial'] else '')+(' / proxy' if r['is_proxy'] else ' / API')) for r in measured]),'']
-    else:
+    elif not snaps:
         out+=['（本日无跨平台有数值观测；见下方折叠摘要。）','']
+    if snaps:
+        out+=snaps
     # One-line omit summary per platform instead of wall of unavailable rows.
     omit_rows=[]
     for p in sorted({r['platform'] for r in signals}):

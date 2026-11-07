@@ -1,16 +1,31 @@
 """Public source adapters with human-like browser / TLS fingerprinting.
 Raw evidence + explicit NULLs. Never invent volumes. Monthly Newsroom is context only.
+
+Sync Playwright always goes through collectors.playwright_worker (fresh thread),
+because the sync API raises inside a running asyncio loop.
 """
 from __future__ import annotations
-import json, re
+import html, json, logging, re, time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 from bs4 import BeautifulSoup
-from collectors.human_fetch import BrowserSession, fetch_cffi, MAC_CHROME_UA, _host_backoff_until
+from collectors.human_fetch import fetch_cffi, host_blocked, mark_backoff
 
 SH = timezone(timedelta(hours=8))
 NEWS = 'https://newsroom.tiktok.com/whats-shaping-the-holiday-season-on-tiktok-shop?lang=en'
 NEWS_PUBLICATION = '2026-10-19'
+log = logging.getLogger('collectors.public_sources')
+
+TREND_PAYLOAD_LIMIT = 5
+TREND_ANCHOR_FALLBACK = 'christmas gifts'
+YT_COUNT_METRIC = 'sampled_video_count_snapshot'
+YT_COUNT_UNIT = 'search_sample_video_count'
+YT_VIEWS_METRIC = 'sampled_video_views_snapshot'
+YT_VIEWS_UNIT = 'sampled_lifetime_video_views'
+SHARED_META_TOPIC = 'shared_category:christmas gifts'
+SHARED_META_QUERY = 'christmas gifts'
+META_METRIC = 'active_ads_shared_category_proxy'
+META_UNIT = 'active_ads_shared_category_proxy'
 
 
 def observation(platform, channel, metric, topic, url, day, **kw):
@@ -67,7 +82,6 @@ def _extract_active_ads_from_xhr(xhr_list):
         body = item.get('body') or ''
         if not body:
             continue
-        # Common patterns in Ad Library JSON
         for pat in (
             r'"ad_library_main"[^{]*\{[^}]*"count"\s*:\s*(\d+)',
             r'"count"\s*:\s*(\d+)[^}]*"edges"',
@@ -119,88 +133,584 @@ def _extract_tt_trend(xhr_list, body):
                     return float(m.group(1)), f'TikTok CC XHR field via {pat}'
                 except ValueError:
                     continue
-    # Fallback: no invented number
     return None, 'No dated numeric trend field in Creative Center XHR/HTML'
 
 
-def collect_google_trends(as_of, watch, yday):
-    """Homepage NID warm-up via Playwright, then pytrends with cooldown batches."""
-    out = []
-    terms = list(watch.get('search_terms') or [])[:5]
-    url = 'https://trends.google.com/trends/explore?' + urlencode({
-        'geo': 'US',
-        'q': ','.join(terms) if terms else 'gifts',
-        'date': f'{(date.fromisoformat(yday) - timedelta(days=6)).isoformat()} {yday}',
-    })
-    # Warm cookies
-    try:
-        with BrowserSession(headless=True) as browser:
-            warm = browser.open_and_capture('https://trends.google.com/trends/explore?geo=US', wait_ms=5000, referer='https://www.google.com/')
-    except Exception as e:  # noqa: BLE001
-        warm = {'error': str(e), 'fetched_at': datetime.now(SH).isoformat()}
+def _pw_failure(url: str, reason: str) -> dict:
+    return {
+        'url': url,
+        'fetched_at': datetime.now(SH).isoformat(),
+        'http_status': None,
+        'body': '',
+        'xhr': [],
+        'error': reason or 'playwright unavailable',
+        'from_cache': False,
+        'transport': 'playwright',
+    }
 
-    values_by_term = {}
-    trends_err = None
-    try:
-        from pytrends.request import TrendReq
-        # Longer timeout; pytrends still uses requests underneath but after browser NID warm-up
-        # and with human pauses between batches — best-effort against 429.
-        # urllib3 v2 dropped method_whitelist; avoid pytrends retries kwargs that break.
-        pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 30))
-        for i in range(0, len(terms), 1):
-            batch = terms[i:i + 1]
+
+def choose_anchor(watch) -> str:
+    """Stable comparison term included in every Trends payload."""
+    for term in (watch or {}).get('search_terms') or []:
+        text = (term or '').strip()
+        if text:
+            return text
+    return TREND_ANCHOR_FALLBACK
+
+
+def trend_payloads(queries, anchor: str, limit: int = TREND_PAYLOAD_LIMIT) -> list[list[str]]:
+    """Batches of at most ``limit`` terms. Every batch includes ``anchor`` once."""
+    if limit < 1:
+        raise ValueError('trend payload limit must be >= 1')
+    uniq: list[str] = []
+    for query in queries:
+        text = (query or '').strip()
+        if text and text not in uniq:
+            uniq.append(text)
+    anchor = (anchor or '').strip()
+    others = [query for query in uniq if query != anchor]
+    if not anchor:
+        return [others[i:i + limit] for i in range(0, len(others), limit)]
+    if not others or limit == 1:
+        return [[anchor]]
+    room = limit - 1
+    return [[anchor, *others[i:i + room]] for i in range(0, len(others), room)]
+
+
+def _on_day(series, yday: str):
+    if not series:
+        return None
+    for day, val in series:
+        if str(day)[:10] == yday:
             try:
-                from collectors.human_fetch import human_pause
-                human_pause(6.0, 12.0)
-                pytrends.build_payload(batch, timeframe=f'{(date.fromisoformat(yday) - timedelta(days=6)).isoformat()} {yday}', geo='US')
-                df = pytrends.interest_over_time()
-                if df is not None and not df.empty and batch[0] in df.columns:
-                    # Last complete day in frame matching yday if present, else last row
-                    series = df[batch[0]]
-                    if yday in [str(x.date()) for x in series.index]:
-                        for idx, val in series.items():
-                            if str(idx.date()) == yday:
-                                values_by_term[batch[0]] = float(val)
-                                break
-                    else:
-                        values_by_term[batch[0]] = float(series.iloc[-1])
-            except Exception as e:  # noqa: BLE001
-                trends_err = str(e)
-                break
-    except Exception as e:  # noqa: BLE001
-        trends_err = str(e)
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+    return None
 
-    for sku, profile in watch['profiles'].items():
+
+def _trend_retryable(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return '429' in msg or 'too many requests' in msg
+
+
+def _fetch_trend_payload(fetcher, payload, timeframe, sleeper, max_attempts: int):
+    last = 'unknown'
+    for attempt in range(max_attempts):
+        try:
+            frame = fetcher(list(payload), timeframe)
+            return frame or {}, None
+        except Exception as exc:  # noqa: BLE001 — pytrends surfaces blocks as exceptions
+            last = str(exc)
+            if not _trend_retryable(exc) or attempt >= max_attempts - 1:
+                if _trend_retryable(exc):
+                    return {}, f'HTTP 429 / pytrends blocked after backoff ({max_attempts} attempts): {last}'
+                return {}, f'pytrends error: {last}'
+            delay = min(60.0, 8.0 * (2 ** attempt))
+            log.warning('[google-trends] HTTP 429 payload=%s; backoff %.0fs attempt %s/%s', payload, delay, attempt + 1, max_attempts)
+            sleeper(delay)
+    return {}, f'HTTP 429 / pytrends blocked after backoff: {last}'
+
+
+def _default_trend_fetcher():
+    def fetch(payload, timeframe):
+        from pytrends.request import TrendReq
+        pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 30))
+        pytrends.build_payload(list(payload), timeframe=timeframe, geo='US')
+        df = pytrends.interest_over_time()
+        if df is None or getattr(df, 'empty', True):
+            return {}
+        out = {}
+        for term in payload:
+            if term not in getattr(df, 'columns', []):
+                continue
+            series = []
+            for idx, val in df[term].items():
+                day = idx.date().isoformat() if hasattr(idx, 'date') else str(idx)[:10]
+                series.append((day, float(val)))
+            out[term] = series
+        return out
+    return fetch
+
+
+def _trend_pause(*_args, **_kwargs):
+    from collectors.human_fetch import human_pause
+    human_pause(6.0, 12.0)
+
+
+def trends_explore_url(query: str, anchor: str, yday: str) -> str:
+    start = (date.fromisoformat(yday) - timedelta(days=6)).isoformat()
+    terms = []
+    for term in (query, anchor):
+        text = (term or '').strip()
+        if text and text not in terms:
+            terms.append(text)
+    return 'https://trends.google.com/trends/explore?' + urlencode({
+        'geo': 'US',
+        'q': ','.join(terms) if terms else anchor,
+        'date': f'{start} {yday}',
+    })
+
+
+def _with_null(text: str) -> str:
+    text = (text or '').strip()
+    if 'NULL' not in text:
+        text += ' NULL, not zero.'
+    return text
+
+
+def collect_google_trends(as_of, watch, yday, *, browsers_ok=True, browser_reason='', fetcher=None, sleeper=None, pause=None, skip_browser=False, max_attempts=4):
+    """One comparable index per SKU configured query.
+
+    Each pytrends payload has at most 5 terms and always includes the anchor,
+    so batches can be rescaled as query/anchor*100. Results map by exact query
+    string. 429 is retried with backoff; other failures stay NULL.
+    """
+    anchor = choose_anchor(watch)
+    pairs = [(sku, ((profile or {}).get('query') or '').strip()) for sku, profile in (watch.get('profiles') or {}).items()]
+    queries = [query for _, query in pairs if query]
+    payloads = trend_payloads(queries, anchor, TREND_PAYLOAD_LIMIT)
+    start = (date.fromisoformat(yday) - timedelta(days=6)).isoformat()
+    timeframe = f'{start} {yday}'
+    warm = {'error': None, 'fetched_at': datetime.now(SH).isoformat()}
+    if not skip_browser:
+        if not browsers_ok:
+            warm['error'] = browser_reason or 'playwright browser unavailable'
+        else:
+            try:
+                from collectors.playwright_worker import run_browser
+
+                def _warm(browser):
+                    return browser.open_and_capture(
+                        'https://trends.google.com/trends/explore?geo=US',
+                        wait_ms=5000,
+                        referer='https://www.google.com/',
+                    )
+                captured = run_browser(_warm) or {}
+                warm = {'error': captured.get('error'), 'fetched_at': captured.get('fetched_at') or warm['fetched_at']}
+            except Exception as exc:  # noqa: BLE001
+                warm['error'] = str(exc)
+    fetcher = fetcher or _default_trend_fetcher()
+    sleeper = sleeper or time.sleep
+    pause = pause or _trend_pause
+    values: dict[str, tuple[float, float, float]] = {}
+    errors: dict[str, str] = {}
+    sku_queries = set(queries)
+    for payload in payloads:
+        pause()
+        frame, err = _fetch_trend_payload(fetcher, payload, timeframe, sleeper, max_attempts)
+        targets = [term for term in payload if term in sku_queries]
+        if err:
+            for term in targets:
+                errors.setdefault(term, err)
+            continue
+        if anchor not in frame:
+            msg = f'anchor term "{anchor}" missing from payload response; columns={sorted(frame)}. NULL, not zero.'
+            for term in targets:
+                errors.setdefault(term, msg)
+            continue
+        anchor_raw = _on_day(frame.get(anchor), yday)
+        if anchor_raw is None:
+            msg = f'yday {yday} not in interest_over_time for anchor "{anchor}". NULL, not zero.'
+            for term in targets:
+                errors.setdefault(term, msg)
+            continue
+        if anchor_raw == 0:
+            msg = f'anchor "{anchor}" interest is 0 on {yday}; batch not comparable. NULL, not zero.'
+            for term in targets:
+                errors.setdefault(term, msg)
+            continue
+        for term in targets:
+            series = frame.get(term)
+            if series is None:
+                errors[term] = (
+                    f'no term match for configured query "{term}"; '
+                    f'response terms were {sorted(frame)}. NULL, not zero.'
+                )
+                continue
+            raw = _on_day(series, yday)
+            if raw is None:
+                errors[term] = f'yday {yday} not in interest_over_time for configured query "{term}". NULL, not zero.'
+                continue
+            values[term] = (raw / anchor_raw * 100.0, raw, anchor_raw)
+            errors.pop(term, None)
+
+    warm_err = warm.get('error')
+    out = []
+    for sku, query in pairs:
+        url = trends_explore_url(query, anchor, yday)
         row = observation('GoogleTrends', 'explore', 'search_velocity', sku, url, yday)
         row['as_of_ts'] = warm.get('fetched_at') or datetime.now(SH).isoformat()
-        # Match SKU query tokens to a search term loosely
-        q = (profile.get('query') or '').lower()
-        hit = None
-        for term, val in values_by_term.items():
-            if any(tok in term.lower() for tok in re.findall(r'[a-z]{4,}', q)[:3]) or any(tok in q for tok in re.findall(r'[a-z]{4,}', term.lower())[:3]):
-                hit = (term, val)
-                break
-        if hit:
+        if not query:
+            row['source_note'] = 'SKU has no configured query. NULL, not zero.'
+            out.append(row)
+            continue
+        if query in values:
+            scaled, raw, anchor_raw = values[query]
+            note = (
+                f'pytrends interest_over_time for configured query "{query}" relative to anchor "{anchor}" '
+                f'(definition=query/anchor*100; raw_query={raw}; raw_anchor={anchor_raw}; scaled={scaled}). '
+                f'Timeframe {timeframe} geo=US. Not search volume.'
+            )
+            if warm_err:
+                note += f' NID warm={warm_err}.'
             row.update(
-                value=hit[1], unit='interest_index', status='observed', available_at=as_of,
-                source_note=f'pytrends interest_over_time for "{hit[0]}" after Playwright Trends warm-up; proxy index not search volume. NID warm err={warm.get("error")}',
+                value=scaled, unit='interest_index_vs_anchor', status='observed',
+                available_at=as_of, is_proxy=1, source_note=note,
             )
         else:
-            row['source_note'] = (
-                f'Google Trends unavailable after human-like attempt. warm={warm.get("error")}; '
-                f'pytrends={trends_err or ("no term match; got " + str(list(values_by_term)))}. NULL, not zero.'
-            )
-            if trends_err and ('429' in trends_err or 'Sorry' in trends_err):
-                row['source_note'] = 'HTTP 429 / pytrends blocked after backoff + cache miss. ' + row['source_note']
+            reason = errors.get(query) or f'no term match for configured query "{query}". NULL, not zero.'
+            if warm_err:
+                reason = f'warm={warm_err}; {reason}'
+            row['source_note'] = _with_null(reason)
         out.append(row)
     return out
 
 
+def build_youtube_rows(sku, profile, *, surl, fetched, videos, as_of, today):
+    """Search-sample count and cumulative views on the collection date.
+
+    These are snapshots, not daily view velocity. ``signal_date`` is ``as_of``.
+    """
+    fetched = fetched or {}
+    videos = videos or []
+    count_row = observation('YouTube', 'public_search', YT_COUNT_METRIC, sku, surl, as_of)
+    views_row = observation('YouTube', 'public_search', YT_VIEWS_METRIC, sku, surl, as_of)
+    fetched_at = fetched.get('fetched_at') or datetime.now(SH).isoformat()
+    for row in (count_row, views_row):
+        row['as_of_ts'] = fetched_at
+        row['period_start'] = as_of
+        row['period_end'] = as_of
+        row['is_proxy'] = 1
+    if as_of != today:
+        note = (
+            'Historical as_of — no backdated search sample. '
+            'cumulative/sample snapshot not collected for a past day. NULL, not zero.'
+        )
+        count_row['source_note'] = note
+        views_row['source_note'] = note
+        return [count_row, views_row]
+    tokens = [
+        t for t in re.findall('[a-z]+', ((profile or {}).get('query') or '').lower())
+        if len(t) > 3 and t not in ('gifts', 'christmas', 'family', 'holiday', 'ready', 'stock')
+    ]
+    matched = [video for video in videos if any(token in _txt(video.get('title', {})).lower() for token in tokens)]
+    relevant = matched or videos[:12]
+    counts = [count for count in (_view_count(_txt(video.get('viewCountText', {}))) for video in relevant) if count is not None]
+    err = fetched.get('error')
+    if counts and not err:
+        n = len(counts)
+        total = float(sum(counts))
+        count_row.update(
+            value=float(n), unit=YT_COUNT_UNIT, status='snapshot', is_partial=0, available_at=as_of,
+            source_note=(
+                'cumulative/sample snapshot: search-sample video count for this SKU query on the collection date. '
+                f'n={n}. Not daily views. Window={as_of}. '
+                'DoD only versus the previous calendar-day snapshot of this same metric definition.'
+            ),
+        )
+        views_row.update(
+            value=total, unit=YT_VIEWS_UNIT, status='snapshot', is_partial=0, available_at=as_of,
+            source_note=(
+                'cumulative/sample snapshot: sum of lifetime view counts on the collected search sample. '
+                f'n={n}. Not daily views. Window={as_of} (collection date, not the previous UTC day). '
+                'DoD only versus the previous calendar-day snapshot of this same metric definition.'
+            ),
+        )
+    else:
+        note = (
+            'YouTube search sample NULL, not zero. '
+            f'status={fetched.get("http_status")} err={err} '
+            f'videos_parsed={len(videos)} countable={len(counts)}. '
+            'cumulative/sample snapshot was not observed.'
+        )
+        count_row['source_note'] = note
+        views_row['source_note'] = note
+    return [count_row, views_row]
+
+
+def meta_shared_rows(meta_data, meta_url, as_of, ads_count):
+    """One shared category inventory curve, not one copy per SKU."""
+    meta_data = meta_data or {}
+    row = observation('Meta', 'AdLibrary', META_METRIC, SHARED_META_TOPIC, meta_url, as_of)
+    row['as_of_ts'] = meta_data.get('fetched_at')
+    row['period_start'] = as_of
+    row['period_end'] = as_of
+    base = (
+        'shared category inventory proxy: one Ad Library curve for keyword '
+        f'"{SHARED_META_QUERY}", not 9 independent SKU observations. '
+        f'Window={as_of} (collection date). '
+        'DoD only versus the previous calendar-day snapshot of this same definition. '
+        f'transport=playwright cache={meta_data.get("from_cache")}'
+    )
+    if ads_count is not None and not meta_data.get('error'):
+        row.update(
+            value=float(ads_count), unit=META_UNIT, status='snapshot', is_partial=0,
+            is_proxy=1, available_at=as_of, source_note=base,
+        )
+    else:
+        row['source_note'] = (
+            'Meta Ad Library shared category inventory proxy NULL, not zero, and not per-SKU. '
+            f'status={meta_data.get("http_status")} err={meta_data.get("error")}. {base}'
+        )
+    return [row]
+
+
+def instagram_rows(watch, ig_data, ig_url, day):
+    """Instagram has no public dated aggregate. Always NULL, even if the page shows a number."""
+    ig_data = ig_data or {}
+    note = (
+        'Instagram explore has no public dated aggregate (login wall or no time series). '
+        'NULL, not zero. '
+        f'http_status={ig_data.get("http_status")} err={ig_data.get("error") or "no dated public aggregate"}.'
+    )
+    rows = []
+    for sku in (watch.get('profiles') or {}):
+        row = observation('Meta', 'Instagram', 'reels_keyword_velocity', sku, ig_url, day)
+        row['as_of_ts'] = ig_data.get('fetched_at')
+        row['source_note'] = note
+        rows.append(row)
+    return rows
+
+
+def _reddit_listing_ok(data) -> bool:
+    if not data or data.get('error'):
+        return False
+    if data.get('http_status') not in (200, 201):
+        return False
+    return bool(data.get('body'))
+
+
+def _status_reason(label: str, data) -> str:
+    data = data or {}
+    status = data.get('http_status')
+    err = data.get('error')
+    if status in (403, 429):
+        return f'{label} HTTP {status}'
+    if status:
+        return f'{label} HTTP {status}' + (f' ({err})' if err else '')
+    return f'{label} error: {err or "no response"}'
+
+
+def unwrap_playwright_rss(body: str) -> str:
+    """Chromium sometimes wraps RSS XML in an HTML <pre> with escaped markup."""
+    if not body:
+        return ''
+    head = body[:800].lower()
+    if '<entry' in body or '<item' in body or '<feed' in head or '<rss' in head:
+        return body
+    match = re.search(r'<pre[^>]*>([\s\S]*?)</pre>', body, re.I)
+    if not match:
+        return body
+    unescaped = html.unescape(match.group(1))
+    lowered = unescaped[:800].lower()
+    if '<entry' in unescaped or '<item' in unescaped or '<feed' in lowered or '<rss' in lowered:
+        return unescaped
+    return body
+
+
+def reddit_gap_note(data) -> str:
+    data = data or {}
+    extra = data.get('source_extra')
+    err = data.get('error')
+    if extra:
+        text = str(extra)
+    elif err:
+        text = str(err)
+    else:
+        text = 'Public listing cannot fully cover the target UTC day or no relevant sample.'
+        if data.get('fetch_note'):
+            text += ' Fetch path: ' + str(data['fetch_note'])
+    return _with_null(text)
+
+
+def load_reddit_sub(sub, *, fetch_json, fetch_old_rss, browsers_ok=True, browser_reason=''):
+    """JSON first. On 403/429, old.reddit.com ``.rss`` via Playwright.
+
+    Host backoff is respected. www.reddit.com backoff is not cleared to force
+    another www request, and old.reddit.com is skipped while that host is in backoff.
+    """
+    json_url = f'https://www.reddit.com/r/{sub}/new.json?limit=100'
+    old_url = f'https://old.reddit.com/r/{sub}/new/.rss'
+    now = datetime.now(SH).isoformat()
+    reasons = []
+    if host_blocked(json_url):
+        data = {
+            'url': json_url, 'fetched_at': now, 'http_status': None, 'body': '',
+            'error': 'www.reddit.com host backoff in effect; no request sent',
+            'from_cache': False, 'transport': 'curl_cffi/chrome124',
+        }
+    else:
+        data = fetch_json(json_url, sub) or {}
+        data.setdefault('url', json_url)
+        data.setdefault('fetched_at', now)
+    if _reddit_listing_ok(data):
+        data['reddit_mode'] = data.get('reddit_mode') or 'json'
+        data['listing_url'] = json_url
+        data['error'] = None
+        return data
+    status = data.get('http_status')
+    if status in (403, 429):
+        mark_backoff(json_url, status, 0)
+    reasons.append(_status_reason('www.reddit.com JSON', data))
+    if host_blocked(json_url):
+        reasons.append('www.reddit.com host backoff in effect; no further www.reddit.com requests')
+    if host_blocked(old_url):
+        reasons.append('old.reddit.com host backoff in effect; skipped Playwright RSS')
+        data['source_extra'] = '; '.join(reasons)
+        data['listing_url'] = json_url
+        return data
+    if not browsers_ok:
+        reasons.append('old.reddit.com RSS via Playwright not attempted: ' + (browser_reason or 'browser unavailable'))
+        data['source_extra'] = '; '.join(reasons)
+        data['listing_url'] = json_url
+        return data
+    try:
+        pw = fetch_old_rss(old_url, sub) or {}
+    except Exception as exc:  # noqa: BLE001
+        reasons.append(f'old.reddit.com RSS via Playwright failed: {exc}')
+        data['source_extra'] = '; '.join(reasons)
+        data['listing_url'] = json_url
+        return data
+    pw.setdefault('url', old_url)
+    pw.setdefault('fetched_at', now)
+    body = unwrap_playwright_rss(pw.get('body') or '')
+    pw_status = pw.get('http_status')
+    if pw_status in (403, 429):
+        mark_backoff(old_url, pw_status, 0)
+    usable = bool(body) and ('<entry' in body or '<item' in body) and not pw.get('error') and pw_status in (200, 201)
+    if usable:
+        out = dict(pw)
+        out['body'] = body
+        out['reddit_mode'] = 'old_reddit_rss'
+        out['error'] = None
+        out['listing_url'] = old_url
+        out['fetch_note'] = '; '.join(reasons)
+        return out
+    reasons.append(_status_reason('old.reddit.com RSS via Playwright', pw))
+    data['source_extra'] = '; '.join(reasons)
+    data['listing_url'] = json_url
+    return data
+
+
+def parse_reddit_posts(data) -> list:
+    if not _body_usable(data):
+        return []
+    body = unwrap_playwright_rss(data.get('body') or '')
+    mode = data.get('reddit_mode') or ''
+    posts = []
+    if mode in ('rss', 'old_reddit_rss') or body.lstrip().startswith('<?xml') or '<feed' in body[:240] or '<rss' in body[:240]:
+        chunks = re.findall(r'<entry[\s\S]*?</entry>', body) or re.findall(r'<item[\s\S]*?</item>', body)
+        for block in chunks:
+            title_m = re.search(r'<title[^>]*>([\s\S]*?)</title>', block)
+            content_m = re.search(r'<(?:content|description|summary)[^>]*>([\s\S]*?)</(?:content|description|summary)>', block)
+            updated_m = re.search(r'<(?:updated|published|pubDate)[^>]*>([^<]+)</', block)
+            ts = 0.0
+            if updated_m:
+                raw_ts = updated_m.group(1).strip()
+                try:
+                    from email.utils import parsedate_to_datetime
+                    ts = parsedate_to_datetime(raw_ts).timestamp()
+                except Exception:
+                    try:
+                        ts = datetime.fromisoformat(raw_ts.replace('Z', '+00:00')).timestamp()
+                    except Exception:
+                        ts = 0.0
+            posts.append({
+                'title': html.unescape(re.sub(r'<[^>]+>', '', title_m.group(1) if title_m else '')),
+                'selftext': html.unescape(re.sub(r'<[^>]+>', '', content_m.group(1) if content_m else '')),
+                'created_utc': ts,
+                'num_comments': 0,
+            })
+        return posts
+    try:
+        raw = body
+        if '<html' in raw[:200].lower():
+            match = re.search(r'(\{\s*"kind"\s*:\s*"Listing"[\s\S]+)', raw)
+            raw = match.group(1) if match else raw
+        return [post['data'] for post in json.loads(raw)['data']['children']]
+    except (ValueError, KeyError, TypeError):
+        return []
+
+
+def _body_usable(data) -> bool:
+    if not data or not data.get('body'):
+        return False
+    if data.get('reddit_mode') in ('rss', 'old_reddit_rss', 'playwright_json'):
+        return True
+    return not data.get('error')
+
+
+def _reddit_rows(sub, data, posts, watch, as_of, yday):
+    rurl = data.get('listing_url') or f'https://www.reddit.com/r/{sub}/new.json?limit=100'
+    start = datetime.fromisoformat(yday).replace(tzinfo=timezone.utc).timestamp()
+    end = start + 86400
+    coverage = bool(posts) and min((p.get('created_utc') or end) for p in posts) <= start
+    week_start = start - 6 * 86400
+    rows = []
+    for sku, profile in watch['profiles'].items():
+        row = observation('Reddit', sub, 'complaint_share', sku, rurl, yday)
+        row.update(as_of_ts=data.get('fetched_at'), unit='fraction')
+        tokens = [t for t in re.findall('[a-z]+', (profile.get('query') or '').lower()) if len(t) > 3]
+        if coverage and not data.get('error'):
+            selected = [
+                p for p in posts
+                if start <= (p.get('created_utc') or 0) < end
+                and any(t in ((p.get('title') or '') + ' ' + (p.get('selftext') or '')).lower() for t in tokens)
+            ]
+            if selected:
+                negative = sum(
+                    any(k in ((p.get('title') or '') + ' ' + (p.get('selftext') or '')).lower() for k in watch['risk_keywords'])
+                    for p in selected
+                )
+                mode = data.get('reddit_mode') or 'json'
+                note = (
+                    f'{mode} public listing; UTC day covered; keyword-matched n={len(selected)}, '
+                    f'complaint-keyword n={negative}. Lexical proxy, not return rate.'
+                )
+                if data.get('fetch_note'):
+                    note += f' Fallback: {data["fetch_note"]}.'
+                row.update(value=negative / len(selected), status='observed', available_at=as_of, source_note=note)
+        if row['value'] is None:
+            row['source_note'] = reddit_gap_note(data)
+        rows.append(row)
+
+        heat = observation('Reddit', sub, 'post_heat_7d', sku, rurl, yday)
+        heat.update(as_of_ts=data.get('fetched_at'), unit='posts')
+        week_posts = [
+            p for p in posts
+            if week_start <= (p.get('created_utc') or 0) < end
+            and any(t in ((p.get('title') or '') + ' ' + (p.get('selftext') or '')).lower() for t in tokens)
+        ]
+        if week_posts and not data.get('error'):
+            comments = sum(int(p.get('num_comments') or 0) for p in week_posts)
+            mode = data.get('reddit_mode') or 'json'
+            heat.update(
+                value=float(len(week_posts)), status='observed', available_at=as_of,
+                source_note=(
+                    f'{mode} last-7d matched posts n={len(week_posts)}, comments_sum={comments}. '
+                    'Sample of /new, not full subreddit volume.'
+                ),
+            )
+        else:
+            if data.get('error') or data.get('source_extra'):
+                heat['source_note'] = reddit_gap_note(data)
+            else:
+                heat['source_note'] = 'No 7d keyword-matched Reddit posts in sample. NULL, not zero.'
+        rows.append(heat)
+    return rows
+
+
 def collect(as_of, watch):
     yday = (date.fromisoformat(as_of) - timedelta(days=1)).isoformat()
+    today = date.today().isoformat()
     out = []
+    try:
+        from collectors.playwright_worker import ensure_chromium_installed
+        browsers_ok, browser_reason = ensure_chromium_installed()
+    except Exception as exc:  # noqa: BLE001 — a self-check must not kill the daily run
+        browsers_ok, browser_reason = False, f'playwright self-check failed: {exc}'
 
-    # --- TikTok Newsroom monthly context (curl_cffi; static OK) ---
     news = fetch_cffi(NEWS, referer='https://www.google.com/', tag='news')
     text = BeautifulSoup(news.get('body') or '', 'html.parser').get_text(' ', strip=True)
     context = [
@@ -225,70 +735,65 @@ def collect(as_of, watch):
             row['source_note'] = news.get('error') or f'Could not verify literal {term} / {expected}% in fetched public page.'
         out.append(row)
 
-    # Single Playwright session for Meta / TikTok CC / YouTube / Trends warm pages
     creative_url = 'https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/en'
     meta_url = 'https://www.facebook.com/ads/library/?' + urlencode({
         'active_status': 'active', 'ad_type': 'all', 'country': 'US',
-        'q': 'christmas gifts', 'search_type': 'keyword_unordered',
+        'q': SHARED_META_QUERY, 'search_type': 'keyword_unordered',
     })
     yt_url = 'https://www.youtube.com/results?' + urlencode({'search_query': 'shorts best gifts under 25 christmas 2026'})
     ig_url = 'https://www.instagram.com/explore/tags/stockingstuffers/'
+    if not browsers_ok:
+        reason = browser_reason or 'playwright browser unavailable'
+        meta_data = _pw_failure(meta_url, reason)
+        tt_data = _pw_failure(creative_url, reason)
+        yt_data = _pw_failure(yt_url, reason)
+        ig_data = _pw_failure(ig_url, reason)
+    else:
+        box: dict = {}
+        try:
+            from collectors.playwright_worker import run_browser
 
-    meta_data = tt_data = yt_data = ig_data = None
-    try:
-        with BrowserSession(headless=True) as browser:
-            meta_data = browser.open_and_capture(
-                meta_url, wait_ms=10000,
-                capture_substrings=['graphql', 'ads/library', 'api/v', 'ad_library'],
-                referer='https://www.facebook.com/',
-            )
-            tt_data = browser.open_and_capture(
-                creative_url, wait_ms=10000,
-                capture_substrings=['api/', 'creative', 'hashtag', 'graphql', 'aweme'],
-                referer='https://ads.tiktok.com/',
-            )
-            yt_data = browser.open_and_capture(
-                yt_url, wait_ms=8000,
-                capture_substrings=['youtubei', 'results'],
-                referer='https://www.youtube.com/',
-            )
-            ig_data = browser.open_and_capture(
-                ig_url, wait_ms=6000,
-                capture_substrings=['graphql', 'api/v1'],
-                referer='https://www.instagram.com/',
-            )
-    except Exception as e:  # noqa: BLE001
-        err = {'url': '', 'fetched_at': datetime.now(SH).isoformat(), 'http_status': None, 'body': '', 'xhr': [], 'error': str(e), 'transport': 'playwright'}
-        meta_data = meta_data or dict(err, url=meta_url)
-        tt_data = tt_data or dict(err, url=creative_url)
-        yt_data = yt_data or dict(err, url=yt_url)
-        ig_data = ig_data or dict(err, url=ig_url)
+            def _grab(browser):
+                box['meta'] = browser.open_and_capture(
+                    meta_url, wait_ms=10000,
+                    capture_substrings=['graphql', 'ads/library', 'api/v', 'ad_library'],
+                    referer='https://www.facebook.com/',
+                )
+                box['tt'] = browser.open_and_capture(
+                    creative_url, wait_ms=10000,
+                    capture_substrings=['api/', 'creative', 'hashtag', 'graphql', 'aweme'],
+                    referer='https://ads.tiktok.com/',
+                )
+                box['yt'] = browser.open_and_capture(
+                    yt_url, wait_ms=8000,
+                    capture_substrings=['youtubei', 'results'],
+                    referer='https://www.youtube.com/',
+                )
+                box['ig'] = browser.open_and_capture(
+                    ig_url, wait_ms=6000,
+                    capture_substrings=['graphql', 'api/v1'],
+                    referer='https://www.instagram.com/',
+                )
+                return box
+            run_browser(_grab)
+            grab_err = None
+        except Exception as exc:  # noqa: BLE001
+            grab_err = str(exc)
+        meta_data = box.get('meta') or _pw_failure(meta_url, grab_err or 'playwright returned no Meta capture')
+        tt_data = box.get('tt') or _pw_failure(creative_url, grab_err or 'playwright returned no TikTok capture')
+        yt_data = box.get('yt') or _pw_failure(yt_url, grab_err or 'playwright returned no YouTube capture')
+        ig_data = box.get('ig') or _pw_failure(ig_url, grab_err or 'playwright returned no Instagram capture')
 
-    # Meta Ad Library → active_ads
     ads_count = _extract_active_ads_from_xhr((meta_data or {}).get('xhr'))
     if ads_count is None and meta_data and meta_data.get('body'):
-        m = re.search(r'(?:About\s+)?([\d,]+)\s+result', meta_data['body'], re.I)
-        if m:
+        matched = re.search(r'(?:About\s+)?([\d,]+)\s+result', meta_data['body'], re.I)
+        if matched:
             try:
-                ads_count = float(m.group(1).replace(',', ''))
+                ads_count = float(matched.group(1).replace(',', ''))
             except ValueError:
                 ads_count = None
-    for sku in watch['profiles']:
-        row = observation('Meta', 'AdLibrary', 'active_ads', sku, meta_url, yday)
-        row['as_of_ts'] = (meta_data or {}).get('fetched_at')
-        if ads_count is not None and not (meta_data or {}).get('error'):
-            row.update(
-                value=ads_count, unit='active_ads_count', status='observed', available_at=as_of, is_proxy=1,
-                source_note=f'Playwright XHR/HTML Active Ads proxy for keyword "christmas gifts" (shared across SKUs, not SKU-specific auction). transport=playwright. cache={(meta_data or {}).get("from_cache")}',
-            )
-        else:
-            row['source_note'] = (
-                f'Meta Ad Library blocked or empty after Playwright+backoff. '
-                f'status={(meta_data or {}).get("http_status")} err={(meta_data or {}).get("error")}. NULL, not zero.'
-            )
-        out.append(row)
+    out.extend(meta_shared_rows(meta_data, meta_url, as_of, ads_count))
 
-    # TikTok Creative Center
     tt_val, tt_note = _extract_tt_trend((tt_data or {}).get('xhr'), (tt_data or {}).get('body'))
     for sku in watch['profiles']:
         for metric in ('content_velocity', 'engagement_rate'):
@@ -311,160 +816,69 @@ def collect(as_of, watch):
                    source_note=(tt_data or {}).get('error') or 'No timestamped daily hashtag series; NULL, not Newsroom monthly substitution.')
         out.append(row)
 
-    # Instagram explore — usually login wall; keep honest NULL
-    for sku in watch['profiles']:
-        row = observation('Meta', 'Instagram', 'reels_keyword_velocity', sku, ig_url, yday)
-        row['as_of_ts'] = (ig_data or {}).get('fetched_at')
-        row['source_note'] = (
-            f'IG explore after Playwright: status={(ig_data or {}).get("http_status")} '
-            f'err={(ig_data or {}).get("error") or "no dated public aggregate"}. NULL.'
-        )
-        out.append(row)
+    out.extend(instagram_rows(watch, ig_data, ig_url, yday))
 
-    # YouTube: shared holiday search first, then per-SKU ytInitialData (today only; never backdate).
-    shared_videos = _parse_yt_initial((yt_data or {}).get('body') or '')
-    sku_yt = {}
-    if as_of == date.today().isoformat():
+    sku_capture: dict = {}
+    if as_of == today and browsers_ok:
         try:
-            with BrowserSession(headless=True) as yb:
+            from collectors.playwright_worker import run_browser
+
+            def _skus(browser):
                 for sku, profile in watch['profiles'].items():
-                    q = (profile.get('query') or sku) + ' christmas gift'
-                    surl = 'https://www.youtube.com/results?' + urlencode({'search_query': q})
-                    yd = yb.open_and_capture(surl, wait_ms=7000, referer='https://www.youtube.com/', capture_substrings=['youtubei'])
-                    sku_yt[sku] = (surl, yd, _parse_yt_initial((yd or {}).get('body') or ''))
-        except Exception as e:  # noqa: BLE001
+                    query = (profile.get('query') or sku) + ' christmas gift'
+                    surl = 'https://www.youtube.com/results?' + urlencode({'search_query': query})
+                    fetched = browser.open_and_capture(
+                        surl, wait_ms=7000, referer='https://www.youtube.com/',
+                        capture_substrings=['youtubei'],
+                    )
+                    sku_capture[sku] = (surl, fetched, _parse_yt_initial((fetched or {}).get('body') or ''))
+                return sku_capture
+            run_browser(_skus)
+        except Exception as exc:  # noqa: BLE001
             for sku in watch['profiles']:
-                sku_yt.setdefault(sku, (yt_url, {'error': str(e), 'fetched_at': datetime.now(SH).isoformat(), 'http_status': None, 'body': ''}, []))
+                sku_capture.setdefault(sku, (yt_url, _pw_failure(yt_url, str(exc)), []))
+    elif as_of == today:
+        for sku in watch['profiles']:
+            sku_capture[sku] = (yt_url, _pw_failure(yt_url, browser_reason or 'playwright browser unavailable'), [])
 
     for sku, profile in watch['profiles'].items():
-        surl, yd, videos = sku_yt.get(sku, (yt_url, yt_data or {}, shared_videos))
-        row = observation('YouTube', 'public_search', 'video_view_velocity', sku, surl, yday)
-        row['as_of_ts'] = (yd or {}).get('fetched_at') or (yt_data or {}).get('fetched_at')
-        tokens = [t for t in re.findall('[a-z]+', (profile.get('query') or '').lower()) if len(t) > 3 and t not in ('gifts', 'christmas', 'family', 'holiday', 'ready', 'stock')]
-        # Prefer title token match; if per-SKU search, accept top rendered videos as sample.
-        relevant = [v for v in videos if any(t in _txt(v.get('title', {})).lower() for t in tokens)] or (videos[:12] if sku in sku_yt else [])
-        counts = [c for c in (_view_count(_txt(v.get('viewCountText', {}))) for v in relevant) if c is not None]
-        if counts and as_of == date.today().isoformat():
-            snap = observation('YouTube', 'public_search', 'sampled_video_views_snapshot', sku, surl, as_of)
-            snap.update(
-                value=sum(counts), unit='sampled_lifetime_video_views', is_partial=1, status='snapshot',
-                as_of_ts=row['as_of_ts'], available_at=as_of,
-                source_note=f'Playwright ytInitialData per-SKU sample n={len(counts)}; lifetime views, selection-biased, not Shorts-only, not daily volume. Never backdated.',
-            )
-            out.append(snap)
-            row.update(
-                value=float(len(counts)), unit='matched_video_count', status='observed', available_at=as_of,
-                source_note=f'Playwright ytInitialData matched/sample video count n={len(counts)}; proxy for content presence, NOT platform-wide daily views.',
-            )
+        if sku in sku_capture:
+            surl, fetched, videos = sku_capture[sku]
         else:
-            row['source_note'] = (
-                f'YouTube after Playwright: status={(yd or {}).get("http_status")} '
-                f'err={(yd or {}).get("error")} videos_parsed={len(videos)}. '
-                f'{"Historical as_of — no backdated lifetime snapshot." if as_of != date.today().isoformat() else "No countable views in sample."} NULL velocity.'
-            )
-        out.append(row)
+            surl, fetched, videos = yt_url, {'error': None, 'fetched_at': datetime.now(SH).isoformat(), 'http_status': None}, []
+        out.extend(build_youtube_rows(
+            sku, profile, surl=surl, fetched=fetched, videos=videos, as_of=as_of, today=today,
+        ))
 
-    # Reddit: try JSON then RSS with curl_cffi; Playwright fallback once per sub.
-    for sub in watch['subreddits']:
-        rurl = f'https://www.reddit.com/r/{sub}/new.json?limit=100'
-        data = fetch_cffi(
-            rurl,
+    def _fetch_json(url, sub):
+        return fetch_cffi(
+            url,
             referer=f'https://www.reddit.com/r/{sub}/',
             accept='application/json,text/plain,*/*',
             tag=f'reddit_{sub}',
         )
-        if data.get('http_status') in (403, 429) or data.get('error'):
-            # Alternate path on same host: clear short backoff so RSS gets one real try.
-            _host_backoff_until.pop('www.reddit.com', None)
-            rss_url = f'https://www.reddit.com/r/{sub}/new/.rss'
-            rss = fetch_cffi(rss_url, referer=f'https://www.reddit.com/r/{sub}/', accept='application/atom+xml,application/rss+xml,text/xml,*/*', tag=f'reddit_rss_{sub}')
-            if not rss.get('error') and rss.get('body') and '<entry' in (rss.get('body') or ''):
-                data = dict(rss)
-                data['reddit_mode'] = 'rss'
-                rurl = rss_url
-            else:
-                try:
-                    with BrowserSession(headless=True) as rb:
-                        pw = rb.open_and_capture(rurl, wait_ms=8000, referer=f'https://www.reddit.com/r/{sub}/', capture_substrings=['.json'])
-                    if pw.get('http_status') == 200 and 'children' in (pw.get('body') or ''):
-                        data = pw; data['reddit_mode'] = 'playwright_json'
-                    else:
-                        data = data  # keep first error
-                        data['source_extra'] = f'rss={(rss.get("http_status"), rss.get("error"))}; pw={(pw.get("http_status"), pw.get("error"))}'
-                except Exception as e:  # noqa: BLE001
-                    data['source_extra'] = f'rss/pw fallback failed: {e}'
 
-        posts = []
-        if data.get('body') and (not data.get('error') or data.get('reddit_mode') in ('rss', 'playwright_json')):
-            body = data['body']
-            if data.get('reddit_mode') == 'rss' or body.lstrip().startswith('<?xml') or '<feed' in body[:240] or '<rss' in body[:240]:
-                chunks = re.findall(r'<entry[\s\S]*?</entry>', body) or re.findall(r'<item[\s\S]*?</item>', body)
-                for block in chunks:
-                    title_m = re.search(r'<title[^>]*>([\s\S]*?)</title>', block)
-                    content_m = re.search(r'<(?:content|description|summary)[^>]*>([\s\S]*?)</(?:content|description|summary)>', block)
-                    updated_m = re.search(r'<(?:updated|published|pubDate)[^>]*>([^<]+)</', block)
-                    ts = 0.0
-                    if updated_m:
-                        raw_ts = updated_m.group(1).strip()
-                        try:
-                            from email.utils import parsedate_to_datetime
-                            ts = parsedate_to_datetime(raw_ts).timestamp()
-                        except Exception:
-                            try:
-                                ts = datetime.fromisoformat(raw_ts.replace('Z', '+00:00')).timestamp()
-                            except Exception:
-                                ts = 0.0
-                    posts.append({
-                        'title': re.sub(r'<[^>]+>', '', title_m.group(1) if title_m else ''),
-                        'selftext': re.sub(r'<[^>]+>', '', content_m.group(1) if content_m else ''),
-                        'created_utc': ts,
-                        'num_comments': 0,
-                    })
-            else:
-                try:
-                    raw = body
-                    if '<html' in raw[:200].lower():
-                        m = re.search(r'(\{\s*"kind"\s*:\s*"Listing"[\s\S]+)', raw)
-                        raw = m.group(1) if m else raw
-                    posts = [p['data'] for p in json.loads(raw)['data']['children']]
-                except (ValueError, KeyError, TypeError):
-                    posts = []
-        start = datetime.fromisoformat(yday).replace(tzinfo=timezone.utc).timestamp()
-        end = start + 86400
-        coverage = bool(posts) and min((p.get('created_utc') or end) for p in posts) <= start
-        # Also emit a 7d heat metric when we have posts in last 7 days
-        week_start = start - 6 * 86400
-        for sku, profile in watch['profiles'].items():
-            row = observation('Reddit', sub, 'complaint_share', sku, rurl, yday)
-            row.update(as_of_ts=data.get('fetched_at'), unit='fraction')
-            tokens = [t for t in re.findall('[a-z]+', (profile.get('query') or '').lower()) if len(t) > 3]
-            if coverage:
-                selected = [p for p in posts if start <= (p.get('created_utc') or 0) < end and any(t in ((p.get('title') or '') + ' ' + (p.get('selftext') or '')).lower() for t in tokens)]
-                if selected:
-                    negative = sum(any(k in ((p.get('title') or '') + ' ' + (p.get('selftext') or '')).lower() for k in watch['risk_keywords']) for p in selected)
-                    row.update(
-                        value=negative / len(selected), status='observed', available_at=as_of,
-                        source_note=f'curl_cffi chrome124 Reddit JSON; UTC day covered; keyword-matched n={len(selected)}, complaint-keyword n={negative}. Lexical proxy, not return rate.',
-                    )
-            if row['value'] is None:
-                row['source_note'] = (data.get('error') or 'Public listing cannot fully cover target UTC day or no relevant sample; NULL, never zero sentiment.') + ((' | ' + data['source_extra']) if data.get('source_extra') else '')
-            out.append(row)
+    def _fetch_old(url, _sub):
+        from collectors.playwright_worker import run_browser
 
-            heat = observation('Reddit', sub, 'post_heat_7d', sku, rurl, yday)
-            heat.update(as_of_ts=data.get('fetched_at'), unit='posts')
-            week_posts = [p for p in posts if week_start <= (p.get('created_utc') or 0) < end and any(t in ((p.get('title') or '') + ' ' + (p.get('selftext') or '')).lower() for t in tokens)]
-            if week_posts and not data.get('error'):
-                comments = sum(int(p.get('num_comments') or 0) for p in week_posts)
-                heat.update(
-                    value=float(len(week_posts)), status='observed', available_at=as_of,
-                    source_note=f'curl_cffi Reddit JSON last-7d matched posts n={len(week_posts)}, comments_sum={comments}. Sample of /new, not full subreddit volume.',
-                )
-            else:
-                heat['source_note'] = data.get('error') or 'No 7d keyword-matched Reddit posts in sample; NULL.'
-            out.append(heat)
+        def _go(browser):
+            return browser.open_and_capture(
+                url, wait_ms=8000, referer='https://old.reddit.com/',
+                capture_substrings=['.rss', 'reddit.com'],
+            )
+        return run_browser(_go)
 
-    # Google Trends (Playwright warm + pytrends batches)
-    out.extend(collect_google_trends(as_of, watch, yday))
+    for sub in watch['subreddits']:
+        data = load_reddit_sub(
+            sub, fetch_json=_fetch_json, fetch_old_rss=_fetch_old,
+            browsers_ok=browsers_ok, browser_reason=browser_reason,
+        )
+        posts = parse_reddit_posts(data)
+        out.extend(_reddit_rows(sub, data, posts, watch, as_of, yday))
+
+    out.extend(collect_google_trends(
+        as_of, watch, yday, browsers_ok=browsers_ok, browser_reason=browser_reason,
+    ))
 
     for row in out:
         row.setdefault('as_of_ts', datetime.now(SH).isoformat())

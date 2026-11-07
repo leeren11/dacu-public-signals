@@ -1,8 +1,11 @@
 """Human-like fetch layer: Playwright persistent Chromium + curl_cffi chrome124.
 Never use bare python-requests for target HTML pages. Honesty: leave NULL on hard blocks.
+
+Sync Playwright must run on a thread with no running asyncio loop. Callers use
+``collectors.playwright_worker.run_browser`` / ``run_sync_playwright``.
 """
 from __future__ import annotations
-import hashlib, json, random, time
+import asyncio, hashlib, json, random, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -76,6 +79,24 @@ def write_cache(url: str, data: dict, tag: str = '') -> Path:
         slim['body'] = body[:80_000] + '\n/* truncated */'
     raw.write_text(json.dumps(slim, ensure_ascii=False))
     return path
+
+
+def assert_sync_playwright_thread() -> None:
+    """Refuse the sync API when this thread already has a running asyncio loop.
+
+    Playwright raises "It looks like you are using Playwright Sync API inside
+    the asyncio loop" in that case. Google Trends warm-up and the Reddit
+    fallback were hitting it on the pipeline thread.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(
+        'Playwright Sync API called inside the asyncio loop. '
+        'Use collectors.playwright_worker.run_sync_playwright so sync Playwright '
+        'runs on a fresh worker thread.'
+    )
 
 
 def host_blocked(url: str) -> bool:
@@ -158,6 +179,7 @@ class BrowserSession:
         self._browser = None
 
     def __enter__(self):
+        assert_sync_playwright_thread()
         from playwright.sync_api import sync_playwright
         PROFILE.mkdir(parents=True, exist_ok=True)
         self._pw = sync_playwright().start()
