@@ -29,6 +29,10 @@ T0 `prediction_*` 与 freeze/T0 数字不变。T0 原四维 /20，Live 五维 /2
 11/08生成不可变Live T1；提前执行只dry-run；缺当日9个director_v1排名或完整X桶则不冻结。11/12、12/01先执行 `backfill_actuals.evaluate`，再导出日更。evaluate 只读真实完整 UTC 日桶，先回填 actuals，再计算**相对冻结前 7 日日均的增长**以及 Spearman / rank MAE。人类读 `walk-forward/walkforward_YYYY-MM-DD.md`：冻结时的秩/动作/分数、基线对评估窗的逐日爬坡、已入库的其他平台行、以及测款/预热/观望是否还站得住。JSON 保存同一内容和 `climb.series`。公开帖量代理，不是销量或 GMV，不写准确率。窗口不齐就 pending。建议提交说明：`walkforward: YYYY-MM-DD`。
 后续校准需积累多个独立窗口后再调参数；本版不在无actual时自动优化（避免泄漏/过拟合）。
 
+## Amazon BSR 证据层（独立，未接入 Live）
+
+US Keepa 名次、价格和评论计数的证据表，不改 T0/T1，也不改 11/12 与 12/01 的回测权重。操作命令、空池 `needs_input`、以及加权重之前要满足的条件见 `docs/amazon_bsr_zh.md`。默认不发实时请求；没有 `KEEPA_API_KEY` 时状态是不可用，不是流水线失败。本机 SQLite 备份不是异地备份。
+
 ## 运行与验证
 - `python3 -m unittest discover -s tests -v`
 - `python3 scripts/run_daily_pipeline.py --as-of 2026-11-06 --with-catalysts`（已有X数据可复用当日run；拟人采集较慢）

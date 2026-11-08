@@ -1,0 +1,13 @@
+# Signal databases, same-machine backups, and Keepa payloads stay off the git remote.
+__pycache__/
+*.pyc
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.sha256
+*.sqlite.bak-*
+db/backups/
+*.keepa.json
+*.keepa.jsonl
