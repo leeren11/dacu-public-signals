@@ -112,8 +112,27 @@ def mark_backoff(url: str, status: int | None, attempt: int) -> None:
         _host_backoff_until[host] = time.monotonic() + wait
 
 
-def fetch_cffi(url: str, *, referer: str | None = None, accept: str | None = None, tag: str = 'cffi') -> dict:
-    """curl_cffi chrome124 for JSON/RSS/simple HTML. Not bare requests."""
+def status_retries(status: int | None, attempt: int, max_attempts: int) -> bool:
+    """429 may be tried again while attempts remain. 403 is a refusal, not a blip."""
+    return status == 429 and attempt + 1 < max_attempts
+
+
+def _serve_cache_or(url: str, tag: str, data: dict) -> dict:
+    cached = read_good_cache(url, tag)
+    if not cached:
+        return data
+    out = dict(cached)
+    out['from_cache'] = True
+    out['error'] = f"{(data or {}).get('error')}; served last good cache"
+    return out
+
+
+def fetch_cffi(url: str, *, referer: str | None = None, accept: str | None = None, tag: str = 'cffi', max_attempts: int = 2) -> dict:
+    """curl_cffi chrome124 for JSON/RSS/simple HTML. Not bare requests.
+
+    HTTP 403 returns immediately. Repeating it is what turned a Reddit JSON
+    refusal into an RSS 429 on the same IP. HTTP 429 is retried once.
+    """
     if host_blocked(url):
         cached = read_good_cache(url, tag)
         if cached:
@@ -137,7 +156,8 @@ def fetch_cffi(url: str, *, referer: str | None = None, accept: str | None = Non
         headers['Accept'] = accept
 
     last_err = None
-    for attempt in range(3):
+    attempts = max(1, int(max_attempts))
+    for attempt in range(attempts):
         try:
             resp = creq.get(url, headers=headers, impersonate='chrome124', timeout=25, allow_redirects=True)
             data = {
@@ -149,17 +169,22 @@ def fetch_cffi(url: str, *, referer: str | None = None, accept: str | None = Non
                 'from_cache': False,
                 'transport': 'curl_cffi/chrome124',
             }
-            if resp.status_code in (403, 429):
+            if status_retries(resp.status_code, attempt, attempts):
                 mark_backoff(url, resp.status_code, attempt)
                 last_err = data
-                time.sleep(min(60, 8 * (2 ** attempt)) + random.uniform(1, 4))
+                time.sleep(min(30, 8 * (2 ** attempt)) + random.uniform(1, 3))
                 continue
+            if resp.status_code in (403, 429):
+                mark_backoff(url, resp.status_code, attempt)
+                return _serve_cache_or(url, tag, data)
             write_cache(url, data, tag)
             return data
         except Exception as e:  # noqa: BLE001 — surface as NULL upstream
             last_err = {'url': url, 'fetched_at': _now_iso(), 'http_status': None, 'body': '', 'error': str(e), 'from_cache': False, 'transport': 'curl_cffi/chrome124'}
             mark_backoff(url, None, attempt)
-            time.sleep(min(60, 8 * (2 ** attempt)) + random.uniform(1, 4))
+            if attempt + 1 >= attempts:
+                break
+            time.sleep(min(30, 8 * (2 ** attempt)) + random.uniform(1, 3))
     cached = read_good_cache(url, tag)
     if cached:
         out = dict(cached)

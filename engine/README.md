@@ -18,7 +18,7 @@ T0 `prediction_*` 与 freeze/T0 数字不变。T0 原四维 /20，Live 五维 /2
 - 同分以T0原Rank稳定排序。Live总分如使用催化理论[-2,27]，五维自身各0–5。
 
 ### 采集与边界
-`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口。采集层：Playwright 持久化 Chromium（data/browser_profile）+ curl_cffi chrome124 + 拟人抖动；禁止裸 requests 抓目标 HTML。缓存 data/platform_cache；原始证据 data/platform_raw（均不入库）。缺测不编量。TikTok Newsroom 月度仅背景。Meta/IG/YT/Trends 失败则 NULL。Reddit 公开 JSON（合规 UA）词法差评样本；非退货率。
+`platform_signals` 保存run、真实测量窗口、来源URL、fetch timestamp、partial/proxy、NULL缺口。采集层：Playwright 持久化 Chromium（data/browser_profile）+ curl_cffi chrome124 + 拟人抖动；禁止裸 requests 抓目标 HTML。缓存 data/platform_cache；原始证据 data/platform_raw（均不入库）。缺测不编量。TikTok Newsroom 月度仅背景。Meta/IG/YT/Trends 失败则 NULL。Reddit 词法差评样本来自已获批应用的 oauth.reddit.com，或无凭证时的一次 old.reddit.com .rss；未登录 .json 不再请求。非退货率。Meta 网页 403 不重试；`META_AD_LIBRARY_TOKEN` 只在 ads_archive 给出显式 total 时写入共享类目快照。US 商业广告若从未触达欧盟，该 API 不返回它们。
 
 ### 入口与日历
 `python3 scripts/run_daily_pipeline.py --as-of YYYY-MM-DD --x-input data/x_YYYY-MM-DD.json`

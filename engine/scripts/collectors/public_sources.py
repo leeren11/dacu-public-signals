@@ -5,7 +5,7 @@ Sync Playwright always goes through collectors.playwright_worker (fresh thread),
 because the sync API raises inside a running asyncio loop.
 """
 from __future__ import annotations
-import html, json, logging, re, time
+import html, json, logging, os, re, time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 from bs4 import BeautifulSoup
@@ -441,19 +441,92 @@ def meta_shared_rows(meta_data, meta_url, as_of, ads_count):
         f'"{SHARED_META_QUERY}", not 9 independent SKU observations. '
         f'Window={as_of} (collection date). '
         'DoD only versus the previous calendar-day snapshot of this same definition. '
-        f'transport=playwright cache={meta_data.get("from_cache")}'
+        f'transport={meta_data.get("transport") or "playwright"} cache={meta_data.get("from_cache")}'
     )
     if ads_count is not None and not meta_data.get('error'):
+        note = base
+        if meta_data.get('archive_note'):
+            note = f"{meta_data['archive_note']}. {base}"
         row.update(
             value=float(ads_count), unit=META_UNIT, status='snapshot', is_partial=0,
-            is_proxy=1, available_at=as_of, source_note=base,
+            is_proxy=1, available_at=as_of, source_note=note,
         )
     else:
+        block = ''
+        transport = meta_data.get('transport') or 'playwright'
+        if meta_data.get('http_status') == 403 and transport == 'playwright':
+            block = (
+                'Web UI HTTP 403 is the Ad Library page refusing this client. It is not retried. '
+                'Graph ads_archive does not return US commercial ads that never reached the EU '
+                '(political/issue ads, or ads that reached the EU, are what that API returns), '
+                'so META_AD_LIBRARY_TOKEN cannot fill this US christmas-gifts inventory curve. '
+            )
+        archive = meta_data.get('archive_note') or ''
         row['source_note'] = (
             'Meta Ad Library shared category inventory proxy NULL, not zero, and not per-SKU. '
-            f'status={meta_data.get("http_status")} err={meta_data.get("error")}. {base}'
+            f'status={meta_data.get("http_status")} err={meta_data.get("error")}. {block}{archive} {base}'
         )
     return [row]
+
+
+def parse_ads_archive_total(payload):
+    """Return an explicit archive total, never the length of one page."""
+    if not isinstance(payload, dict):
+        return None, 'ads_archive body was not a JSON object. NULL, not zero.'
+    err = payload.get('error')
+    if isinstance(err, dict):
+        return None, f"ads_archive error {err.get('code')}: {err.get('message') or 'error'}. NULL, not zero."
+    summary = payload.get('summary')
+    if isinstance(summary, dict):
+        total = summary.get('total_count')
+        if isinstance(total, (int, float)) and not isinstance(total, bool):
+            return float(total), 'summary.total_count'
+    total = payload.get('total_count')
+    if isinstance(total, (int, float)) and not isinstance(total, bool):
+        return float(total), 'total_count'
+    page = payload.get('data')
+    n = len(page) if isinstance(page, list) else 0
+    return None, (
+        f'ads_archive returned {n} ads on this page and no total field. '
+        'Page length is not the category inventory. '
+        'US commercial ads that never reached the EU are outside this API. NULL, not zero.'
+    )
+
+
+def fetch_meta_ads_archive(query, token, *, get):
+    """One Graph ads_archive call. The token stays in the Authorization header, not the URL."""
+    url = 'https://graph.facebook.com/v21.0/ads_archive?' + urlencode({
+        'search_terms': query,
+        'ad_reached_countries': '["US"]',
+        'ad_active_status': 'ACTIVE',
+        'ad_type': 'ALL',
+        'fields': 'id',
+        'limit': '1',
+    })
+    fetched_at = datetime.now(SH).isoformat()
+    status, text = get(url, {'Authorization': 'Bearer ' + token})
+    base = {
+        'url': url, 'http_status': status, 'xhr': [], 'from_cache': False,
+        'transport': 'graph_ads_archive', 'fetched_at': fetched_at,
+    }
+    if status not in (200, 201):
+        note = f'HTTP {status}'
+        try:
+            err = json.loads(text or '').get('error')
+        except (ValueError, AttributeError):
+            err = None
+        if isinstance(err, dict) and err.get('message'):
+            note = f"HTTP {status}: {err.get('message')}"
+        base.update(body='', error=note, archive_note='')
+        return base, None
+    try:
+        payload = json.loads(text or '')
+    except ValueError:
+        base.update(body='', error='ads_archive body was not JSON', archive_note='')
+        return base, None
+    total, note = parse_ads_archive_total(payload)
+    base.update(body=text or '', error=None, archive_note=note)
+    return base, total
 
 
 def instagram_rows(watch, ig_data, ig_url, day):
@@ -524,54 +597,145 @@ def reddit_gap_note(data) -> str:
     return _with_null(text)
 
 
-def load_reddit_sub(sub, *, fetch_json, fetch_old_rss, browsers_ok=True, browser_reason=''):
-    """JSON first. On 403/429, old.reddit.com ``.rss`` via Playwright.
+ANON_JSON_SKIPPED = (
+    'Unauthenticated www.reddit.com .json is not requested. '
+    'Reddit answers logged-out JSON with HTTP 403, and repeating that call is what exhausted the IP budget and returned HTTP 429 on RSS.'
+)
 
-    Host backoff is respected. www.reddit.com backoff is not cleared to force
-    another www request, and old.reddit.com is skipped while that host is in backoff.
+
+def _reddit_gap(url, reasons, now):
+    return {
+        'url': url, 'fetched_at': now, 'http_status': None, 'body': '',
+        'error': None, 'from_cache': False, 'listing_url': url,
+        'source_extra': '; '.join(reasons),
+    }
+
+
+def reddit_app_credentials():
+    """Already-approved script app. Missing any one of the three means no OAuth call."""
+    client_id = os.environ.get('REDDIT_CLIENT_ID', '').strip()
+    client_secret = os.environ.get('REDDIT_CLIENT_SECRET', '').strip()
+    user_agent = os.environ.get('REDDIT_USER_AGENT', '').strip()
+    if client_id and client_secret and user_agent:
+        return client_id, client_secret, user_agent
+    return None
+
+
+def fetch_reddit_oauth_listing(sub, client_id, client_secret, user_agent, *, post, get, cache, pause=None):
+    """Application-only OAuth. The secret and bearer token are not written into the result."""
+    if cache.get('dead'):
+        return dict(cache['dead'])
+    token = cache.get('token')
+    if not token or time.monotonic() >= (cache.get('exp') or 0):
+        status, text = post(
+            'https://www.reddit.com/api/v1/access_token',
+            {'grant_type': 'client_credentials'},
+            {'User-Agent': user_agent},
+            (client_id, client_secret),
+        )
+        if status != 200:
+            dead = {
+                'url': 'https://www.reddit.com/api/v1/access_token',
+                'http_status': status, 'body': '', 'error': f'HTTP {status}',
+                'fetched_at': datetime.now(SH).isoformat(), 'transport': 'reddit_oauth',
+            }
+            cache['dead'] = dead
+            return dict(dead)
+        try:
+            payload = json.loads(text or '')
+        except ValueError:
+            dead = {
+                'url': 'https://www.reddit.com/api/v1/access_token',
+                'http_status': status, 'body': '', 'error': 'token response was not JSON',
+                'fetched_at': datetime.now(SH).isoformat(), 'transport': 'reddit_oauth',
+            }
+            cache['dead'] = dead
+            return dict(dead)
+        token = payload.get('access_token')
+        if not token:
+            dead = {
+                'url': 'https://www.reddit.com/api/v1/access_token',
+                'http_status': status, 'body': '', 'error': 'token response had no access_token',
+                'fetched_at': datetime.now(SH).isoformat(), 'transport': 'reddit_oauth',
+            }
+            cache['dead'] = dead
+            return dict(dead)
+        try:
+            ttl = float(payload.get('expires_in') or 3600)
+        except (TypeError, ValueError):
+            ttl = 3600.0
+        cache['token'] = token
+        cache['exp'] = time.monotonic() + max(0.0, ttl - 60.0)
+    if pause:
+        pause()
+    listing_url = f'https://oauth.reddit.com/r/{sub}/new?limit=100&raw_json=1'
+    status, text = get(listing_url, {'Authorization': 'bearer ' + token, 'User-Agent': user_agent})
+    return {
+        'url': listing_url,
+        'http_status': status,
+        'body': text or '' if status in (200, 201) else '',
+        'error': None if status in (200, 201) else f'HTTP {status}',
+        'fetched_at': datetime.now(SH).isoformat(),
+        'transport': 'reddit_oauth',
+    }
+
+
+def load_reddit_sub(sub, *, fetch_json=None, fetch_old_rss=None, fetch_oauth=None, browsers_ok=True, browser_reason=''):
+    """One polite listing. OAuth when an approved app is configured; otherwise one RSS.
+
+    Logged-out .json is not called. A 403 there is Reddit's shutdown of that
+    endpoint, and the retries were the request burst behind the RSS 429.
+    An OAuth failure does not fall through to a page fetch. Host backoff is kept.
+    ``fetch_json`` is accepted so older callers still import, and is not used.
     """
-    json_url = f'https://www.reddit.com/r/{sub}/new.json?limit=100'
+    del fetch_json  # anonymous JSON is a permanent 403; calling it spends the RSS budget
     old_url = f'https://old.reddit.com/r/{sub}/new/.rss'
     now = datetime.now(SH).isoformat()
-    reasons = []
-    if host_blocked(json_url):
-        data = {
-            'url': json_url, 'fetched_at': now, 'http_status': None, 'body': '',
-            'error': 'www.reddit.com host backoff in effect; no request sent',
-            'from_cache': False, 'transport': 'curl_cffi/chrome124',
-        }
-    else:
-        data = fetch_json(json_url, sub) or {}
-        data.setdefault('url', json_url)
+    if fetch_oauth is not None:
+        oauth_probe = 'https://oauth.reddit.com/r/' + sub + '/new'
+        if host_blocked(oauth_probe):
+            return _reddit_gap(oauth_probe, [
+                'oauth.reddit.com host backoff in effect; no further Reddit request. NULL, not zero.',
+            ], now)
+        try:
+            data = fetch_oauth(sub) or {}
+        except Exception as exc:  # noqa: BLE001
+            return _reddit_gap(oauth_probe, [
+                f'oauth.reddit.com failed: {exc}. Anonymous JSON and RSS were not used.',
+            ], now)
+        data = data or {}
+        data.setdefault('url', oauth_probe)
         data.setdefault('fetched_at', now)
-    if _reddit_listing_ok(data):
-        data['reddit_mode'] = data.get('reddit_mode') or 'json'
-        data['listing_url'] = json_url
-        data['error'] = None
+        if _reddit_listing_ok(data):
+            data['reddit_mode'] = 'oauth'
+            data['listing_url'] = data.get('url')
+            data['error'] = None
+            return data
+        status = data.get('http_status')
+        if status in (403, 429):
+            mark_backoff(data.get('url') or oauth_probe, status, 0)
+        data['source_extra'] = (
+            'oauth.reddit.com failed; anonymous JSON and RSS were not used. '
+            + _status_reason('oauth.reddit.com', data)
+        )
+        data['listing_url'] = data.get('url') or oauth_probe
         return data
-    status = data.get('http_status')
-    if status in (403, 429):
-        mark_backoff(json_url, status, 0)
-    reasons.append(_status_reason('www.reddit.com JSON', data))
-    if host_blocked(json_url):
-        reasons.append('www.reddit.com host backoff in effect; no further www.reddit.com requests')
+
+    reasons = [ANON_JSON_SKIPPED]
     if host_blocked(old_url):
         reasons.append('old.reddit.com host backoff in effect; skipped Playwright RSS')
-        data['source_extra'] = '; '.join(reasons)
-        data['listing_url'] = json_url
-        return data
+        return _reddit_gap(old_url, reasons, now)
     if not browsers_ok:
         reasons.append('old.reddit.com RSS via Playwright not attempted: ' + (browser_reason or 'browser unavailable'))
-        data['source_extra'] = '; '.join(reasons)
-        data['listing_url'] = json_url
-        return data
+        return _reddit_gap(old_url, reasons, now)
+    if fetch_old_rss is None:
+        reasons.append('old.reddit.com RSS fetcher missing')
+        return _reddit_gap(old_url, reasons, now)
     try:
         pw = fetch_old_rss(old_url, sub) or {}
     except Exception as exc:  # noqa: BLE001
         reasons.append(f'old.reddit.com RSS via Playwright failed: {exc}')
-        data['source_extra'] = '; '.join(reasons)
-        data['listing_url'] = json_url
-        return data
+        return _reddit_gap(old_url, reasons, now)
     pw.setdefault('url', old_url)
     pw.setdefault('fetched_at', now)
     body = unwrap_playwright_rss(pw.get('body') or '')
@@ -585,12 +749,11 @@ def load_reddit_sub(sub, *, fetch_json, fetch_old_rss, browsers_ok=True, browser
         out['reddit_mode'] = 'old_reddit_rss'
         out['error'] = None
         out['listing_url'] = old_url
-        out['fetch_note'] = '; '.join(reasons)
         return out
     reasons.append(_status_reason('old.reddit.com RSS via Playwright', pw))
-    data['source_extra'] = '; '.join(reasons)
-    data['listing_url'] = json_url
-    return data
+    pw['source_extra'] = '; '.join(reasons)
+    pw['listing_url'] = old_url
+    return pw
 
 
 def parse_reddit_posts(data) -> list:
@@ -701,6 +864,24 @@ def _reddit_rows(sub, data, posts, watch, as_of, yday):
     return rows
 
 
+def _graph_get(url, headers):
+    from curl_cffi import requests as creq
+    resp = creq.get(url, headers=headers, timeout=25)
+    return resp.status_code, resp.text or ''
+
+
+def _reddit_post(url, data, headers, auth):
+    from curl_cffi import requests as creq
+    resp = creq.post(url, data=data, headers=headers, auth=auth, timeout=25)
+    return resp.status_code, resp.text or ''
+
+
+def _reddit_get(url, headers):
+    from curl_cffi import requests as creq
+    resp = creq.get(url, headers=headers, timeout=25)
+    return resp.status_code, resp.text or ''
+
+
 def collect(as_of, watch):
     yday = (date.fromisoformat(as_of) - timedelta(days=1)).isoformat()
     today = date.today().isoformat()
@@ -742,9 +923,22 @@ def collect(as_of, watch):
     })
     yt_url = 'https://www.youtube.com/results?' + urlencode({'search_query': 'shorts best gifts under 25 christmas 2026'})
     ig_url = 'https://www.instagram.com/explore/tags/stockingstuffers/'
+    meta_token = os.environ.get('META_AD_LIBRARY_TOKEN', '').strip()
+    ads_count = None
+    meta_data = None
+    if meta_token:
+        try:
+            meta_data, ads_count = fetch_meta_ads_archive(
+                SHARED_META_QUERY, meta_token, get=_graph_get,
+            )
+        except Exception as exc:  # noqa: BLE001
+            meta_data = _pw_failure(meta_url, f'ads_archive request failed: {exc}')
+            meta_data['transport'] = 'graph_ads_archive'
+            ads_count = None
     if not browsers_ok:
         reason = browser_reason or 'playwright browser unavailable'
-        meta_data = _pw_failure(meta_url, reason)
+        if meta_data is None:
+            meta_data = _pw_failure(meta_url, reason)
         tt_data = _pw_failure(creative_url, reason)
         yt_data = _pw_failure(yt_url, reason)
         ig_data = _pw_failure(ig_url, reason)
@@ -754,11 +948,12 @@ def collect(as_of, watch):
             from collectors.playwright_worker import run_browser
 
             def _grab(browser):
-                box['meta'] = browser.open_and_capture(
-                    meta_url, wait_ms=10000,
-                    capture_substrings=['graphql', 'ads/library', 'api/v', 'ad_library'],
-                    referer='https://www.facebook.com/',
-                )
+                if not meta_token:
+                    box['meta'] = browser.open_and_capture(
+                        meta_url, wait_ms=10000,
+                        capture_substrings=['graphql', 'ads/library', 'api/v', 'ad_library'],
+                        referer='https://www.facebook.com/',
+                    )
                 box['tt'] = browser.open_and_capture(
                     creative_url, wait_ms=10000,
                     capture_substrings=['api/', 'creative', 'hashtag', 'graphql', 'aweme'],
@@ -779,13 +974,15 @@ def collect(as_of, watch):
             grab_err = None
         except Exception as exc:  # noqa: BLE001
             grab_err = str(exc)
-        meta_data = box.get('meta') or _pw_failure(meta_url, grab_err or 'playwright returned no Meta capture')
+        if meta_data is None:
+            meta_data = box.get('meta') or _pw_failure(meta_url, grab_err or 'playwright returned no Meta capture')
         tt_data = box.get('tt') or _pw_failure(creative_url, grab_err or 'playwright returned no TikTok capture')
         yt_data = box.get('yt') or _pw_failure(yt_url, grab_err or 'playwright returned no YouTube capture')
         ig_data = box.get('ig') or _pw_failure(ig_url, grab_err or 'playwright returned no Instagram capture')
 
-    ads_count = _extract_active_ads_from_xhr((meta_data or {}).get('xhr'))
-    if ads_count is None and meta_data and meta_data.get('body'):
+    if not meta_token:
+        ads_count = _extract_active_ads_from_xhr((meta_data or {}).get('xhr'))
+    if ads_count is None and meta_data and meta_data.get('body') and not meta_token:
         matched = re.search(r'(?:About\s+)?([\d,]+)\s+result', meta_data['body'], re.I)
         if matched:
             try:
@@ -850,12 +1047,13 @@ def collect(as_of, watch):
             sku, profile, surl=surl, fetched=fetched, videos=videos, as_of=as_of, today=today,
         ))
 
-    def _fetch_json(url, sub):
-        return fetch_cffi(
-            url,
-            referer=f'https://www.reddit.com/r/{sub}/',
-            accept='application/json,text/plain,*/*',
-            tag=f'reddit_{sub}',
+    creds = reddit_app_credentials()
+    oauth_cache: dict = {}
+
+    def _fetch_oauth(sub):
+        from collectors.human_fetch import human_pause
+        return fetch_reddit_oauth_listing(
+            sub, *creds, post=_reddit_post, get=_reddit_get, cache=oauth_cache, pause=human_pause,
         )
 
     def _fetch_old(url, _sub):
@@ -870,7 +1068,8 @@ def collect(as_of, watch):
 
     for sub in watch['subreddits']:
         data = load_reddit_sub(
-            sub, fetch_json=_fetch_json, fetch_old_rss=_fetch_old,
+            sub, fetch_old_rss=_fetch_old,
+            fetch_oauth=_fetch_oauth if creds else None,
             browsers_ok=browsers_ok, browser_reason=browser_reason,
         )
         posts = parse_reddit_posts(data)
