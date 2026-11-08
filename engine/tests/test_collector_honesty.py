@@ -11,15 +11,18 @@ ENGINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ENGINE / 'scripts'))
 
 from collect_multi_platform import annotate_dod  # noqa: E402
-from collectors.human_fetch import _host_backoff_until, mark_backoff  # noqa: E402
+from collectors.human_fetch import _host_backoff_until, status_retries  # noqa: E402
 from collectors.public_sources import (  # noqa: E402
     SHARED_META_TOPIC,
     build_youtube_rows,
     choose_anchor,
     collect_google_trends,
+    fetch_meta_ads_archive,
+    fetch_reddit_oauth_listing,
     instagram_rows,
     load_reddit_sub,
     meta_shared_rows,
+    parse_ads_archive_total,
     parse_reddit_posts,
     reddit_gap_note,
     trend_payloads,
@@ -298,7 +301,7 @@ class RedditFallbackTests(unittest.TestCase):
     def tearDown(self):
         _host_backoff_until.clear()
 
-    def test_403_then_old_reddit_rss_respects_backoff(self):
+    def test_anonymous_path_is_one_rss_and_does_not_call_json(self):
         calls = []
         xml = (
             '<?xml version="1.0"?><rss version="2.0"><channel><item>'
@@ -310,7 +313,6 @@ class RedditFallbackTests(unittest.TestCase):
 
         def fetch_json(url, sub):
             calls.append(('json', url, sub))
-            mark_backoff(url, 403, 0)
             return {'url': url, 'http_status': 403, 'body': '', 'error': 'HTTP 403', 'fetched_at': 't'}
 
         def fetch_old(url, sub):
@@ -326,51 +328,66 @@ class RedditFallbackTests(unittest.TestCase):
         self.assertEqual(len(posts), 1)
         self.assertIn('squishy', posts[0]['title'])
         self.assertGreater(posts[0]['created_utc'], 0)
-        self.assertIn('www.reddit.com', _host_backoff_until)
-        self.assertNotIn(('pw', 'https://www.reddit.com/r/beauty/new/.rss', 'beauty'), calls)
-        self.assertTrue(all('old.reddit.com' in url for kind, url, _sub in calls if kind == 'pw'))
+        self.assertEqual([kind for kind, _url, _sub in calls], ['pw'])
+        self.assertNotIn('www.reddit.com', _host_backoff_until)
 
     def test_429_keeps_host_backoff_for_the_next_subreddit(self):
         calls = []
-
-        def fetch_json(url, sub):
-            calls.append(('json', url, sub))
-            return {'url': url, 'http_status': 403, 'body': '', 'error': 'HTTP 403', 'fetched_at': 't'}
 
         def fetch_old(url, sub):
             calls.append(('pw', url, sub))
             return {'url': url, 'http_status': 429, 'body': '', 'error': 'HTTP 429', 'fetched_at': 't'}
 
-        blocked = load_reddit_sub('beauty', fetch_json=fetch_json, fetch_old_rss=fetch_old, browsers_ok=True)
+        blocked = load_reddit_sub('beauty', fetch_old_rss=fetch_old, browsers_ok=True)
         note = reddit_gap_note(blocked)
-        self.assertIn('HTTP 403', note)
         self.assertIn('HTTP 429', note)
         self.assertIn('old.reddit.com', note)
+        self.assertIn('not requested', note)
         self.assertIn('NULL', note)
-        self.assertIn('www.reddit.com', _host_backoff_until)
+        self.assertNotIn('www.reddit.com', _host_backoff_until)
         self.assertIn('old.reddit.com', _host_backoff_until)
-        self.assertTrue(all('www.reddit.com' not in url or url.endswith('.json?limit=100') for _kind, url, _sub in calls))
         calls.clear()
-        skipped = load_reddit_sub('TikTokShop', fetch_json=fetch_json, fetch_old_rss=fetch_old, browsers_ok=True)
+        skipped = load_reddit_sub('TikTokShop', fetch_old_rss=fetch_old, browsers_ok=True)
         self.assertEqual(calls, [])
         skipped_note = reddit_gap_note(skipped)
         self.assertIn('backoff', skipped_note)
-        self.assertIn('www.reddit.com', skipped_note)
         self.assertIn('old.reddit.com', skipped_note)
         self.assertIn('NULL', skipped_note)
 
-    def test_success_json_does_not_call_playwright(self):
+    def test_oauth_success_does_not_call_rss(self):
         def fetch_old(_url, _sub):
-            raise AssertionError('playwright fallback should not run')
+            raise AssertionError('RSS should not run when OAuth returned a listing')
 
         data = load_reddit_sub(
             'beauty',
-            fetch_json=lambda url, sub: {'url': url, 'http_status': 200, 'body': '{"data":{"children":[]}}', 'error': None, 'fetched_at': 't'},
+            fetch_oauth=lambda sub: {
+                'url': 'https://oauth.reddit.com/r/beauty/new?limit=100&raw_json=1',
+                'http_status': 200, 'body': '{"data":{"children":[]}}', 'error': None, 'fetched_at': 't',
+            },
             fetch_old_rss=fetch_old,
             browsers_ok=True,
         )
-        self.assertEqual(data['reddit_mode'], 'json')
+        self.assertEqual(data['reddit_mode'], 'oauth')
         self.assertFalse(data.get('source_extra'))
+
+    def test_oauth_failure_does_not_scrape(self):
+        def fetch_old(_url, _sub):
+            raise AssertionError('RSS must not run after an OAuth failure')
+
+        data = load_reddit_sub(
+            'beauty',
+            fetch_oauth=lambda sub: {
+                'url': 'https://oauth.reddit.com/r/beauty/new?limit=100&raw_json=1',
+                'http_status': 401, 'body': '', 'error': 'HTTP 401', 'fetched_at': 't',
+            },
+            fetch_old_rss=fetch_old,
+            browsers_ok=True,
+        )
+        note = reddit_gap_note(data)
+        self.assertIn('oauth.reddit.com', note)
+        self.assertIn('HTTP 401', note)
+        self.assertIn('not used', note)
+        self.assertIn('NULL', note)
 
     def test_missing_browser_skips_playwright_with_reason(self):
         def fetch_old(_url, _sub):
@@ -378,16 +395,113 @@ class RedditFallbackTests(unittest.TestCase):
 
         data = load_reddit_sub(
             'beauty',
-            fetch_json=lambda url, sub: {'url': url, 'http_status': 403, 'body': '', 'error': 'HTTP 403', 'fetched_at': 't'},
             fetch_old_rss=fetch_old,
             browsers_ok=False,
             browser_reason='Playwright browser install failed: exit=1',
         )
         note = reddit_gap_note(data)
-        self.assertIn('HTTP 403', note)
+        self.assertIn('not requested', note)
         self.assertIn('not attempted', note)
         self.assertIn('install failed', note)
         self.assertIn('NULL', note)
+
+
+class BlockPolicyTests(unittest.TestCase):
+    def test_403_is_not_retried_and_429_retries_once(self):
+        self.assertFalse(status_retries(403, 0, 2))
+        self.assertTrue(status_retries(429, 0, 2))
+        self.assertFalse(status_retries(429, 1, 2))
+        self.assertFalse(status_retries(200, 0, 2))
+
+    def test_page_length_is_not_an_ad_inventory(self):
+        total, note = parse_ads_archive_total({'data': [{'id': '1'}] * 25})
+        self.assertIsNone(total)
+        self.assertIn('25', note)
+        self.assertIn('not the category inventory', note)
+        self.assertIn('NULL', note)
+
+    def test_explicit_archive_total_is_kept(self):
+        total, note = parse_ads_archive_total({'summary': {'total_count': 1200}, 'data': [{'id': '1'}]})
+        self.assertEqual(total, 1200.0)
+        self.assertEqual(note, 'summary.total_count')
+
+    def test_archive_request_keeps_the_token_out_of_the_url(self):
+        seen = {}
+
+        def get(url, headers):
+            seen['url'] = url
+            seen['headers'] = headers
+            return 400, json.dumps({'error': {'message': 'Invalid OAuth access token.', 'code': 190}})
+
+        data, total = fetch_meta_ads_archive('christmas gifts', 'secret-token', get=get)
+        self.assertIsNone(total)
+        self.assertNotIn('secret-token', data['url'])
+        self.assertNotIn('secret-token', json.dumps({k: v for k, v in data.items() if k != 'xhr'}))
+        self.assertEqual(seen['headers']['Authorization'], 'Bearer secret-token')
+        self.assertIn('Invalid OAuth access token.', data['error'])
+        rows = meta_shared_rows(data, data['url'], AS_OF, total)
+        self.assertIsNone(rows[0]['value'])
+        self.assertIn('NULL', rows[0]['source_note'])
+
+    def test_web_ui_403_names_the_api_limit(self):
+        rows = meta_shared_rows(
+            {'http_status': 403, 'error': 'HTTP 403', 'transport': 'playwright', 'fetched_at': 't'},
+            'https://www.facebook.com/ads/library/?q=christmas+gifts', AS_OF, None,
+        )
+        note = rows[0]['source_note']
+        self.assertIn('HTTP 403', note)
+        self.assertIn('not retried', note)
+        self.assertIn('never reached the EU', note)
+        self.assertIsNone(rows[0]['value'])
+
+    def test_oauth_token_is_reused_and_secret_stays_out_of_the_result(self):
+        posts = []
+
+        def post(url, data, headers, auth):
+            posts.append((url, data, headers, auth))
+            return 200, json.dumps({'access_token': 'bearer-value', 'expires_in': 3600})
+
+        gets = []
+
+        def get(url, headers):
+            gets.append((url, headers))
+            return 200, '{"data":{"children":[]}}'
+
+        cache = {}
+        first = fetch_reddit_oauth_listing(
+            'beauty', 'app-id', 'app-secret', 'linux:dacu:v1 (by /u/example)',
+            post=post, get=get, cache=cache, pause=lambda: None,
+        )
+        second = fetch_reddit_oauth_listing(
+            'TikTokShop', 'app-id', 'app-secret', 'linux:dacu:v1 (by /u/example)',
+            post=post, get=get, cache=cache, pause=lambda: None,
+        )
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(len(gets), 2)
+        self.assertEqual(first['http_status'], 200)
+        self.assertEqual(second['http_status'], 200)
+        dumped = json.dumps([first, second, {k: v for k, v in cache.items() if k != 'token'}])
+        self.assertNotIn('app-secret', dumped)
+        self.assertNotIn('bearer-value', dumped)
+
+    def test_oauth_token_failure_is_not_retried_for_the_next_subreddit(self):
+        posts = []
+
+        def post(url, data, headers, auth):
+            posts.append(url)
+            return 401, ''
+
+        cache = {}
+        first = fetch_reddit_oauth_listing(
+            'beauty', 'app-id', 'app-secret', 'ua', post=post, get=lambda *_: (200, ''), cache=cache,
+        )
+        second = fetch_reddit_oauth_listing(
+            'TikTokShop', 'app-id', 'app-secret', 'ua', post=post, get=lambda *_: (200, ''), cache=cache,
+        )
+        self.assertEqual(posts, ['https://www.reddit.com/api/v1/access_token'])
+        self.assertEqual(first['http_status'], 401)
+        self.assertEqual(second['http_status'], 401)
+        self.assertNotIn('app-secret', json.dumps([first, second]))
 
 
 if __name__ == '__main__':
