@@ -56,3 +56,5 @@ Live 仍可能以 X + 稀疏跨平台 + 分析师先验为主；**不声称全�
 ```bash
 python3 scripts/evidence_v2_cli.py run --db /tmp/evidence_v2_example.sqlite --fixture examples/evidence_v2_min.json
 ```
+
+`youtube_official_feed_v1` 是另一条未接入日更的官方 Atom shadow。它不给 SKU 覆盖，也不把累计 views 当成日播放。条款、安装和 7 个日更周期的验收见 `docs/youtube_official_feed_v1_zh.md`。

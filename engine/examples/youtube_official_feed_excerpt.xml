@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PUBLIC_FEED_EXCERPT_NOT_PRODUCTION: two entries already cited in the 2026-11-25 handoff. Not a full channel archive. -->
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <title>EBANKUnail_official</title>
+ <yt:channelId>UCp7db2pxQKGH1mI7D_Jxedg</yt:channelId>
+ <entry>
+  <id>yt:video:d23RxaInO1g</id>
+  <yt:videoId>d23RxaInO1g</yt:videoId>
+  <yt:channelId>UCp7db2pxQKGH1mI7D_Jxedg</yt:channelId>
+  <title>Christmas nails ready for girls ✨🎄 #christmas #nailtok #youtube #pressonnails #simplenails #nailart</title>
+  <link rel="alternate" href="https://www.youtube.com/shorts/d23RxaInO1g"/>
+  <published>2026-11-25T14:40:02+00:00</published>
+  <updated>2026-11-25T15:53:37+00:00</updated>
+  <media:group><media:community><media:statistics views="8"/></media:community></media:group>
+ </entry>
+ <entry>
+  <id>yt:video:xHWHamkgG-g</id>
+  <yt:videoId>xHWHamkgG-g</yt:videoId>
+  <yt:channelId>UCp7db2pxQKGH1mI7D_Jxedg</yt:channelId>
+  <title>Christmas gifts for girls ✨🎄 #christmas #nailtok #simplenails #youtube #nailart #pressonnails</title>
+  <link rel="alternate" href="https://www.youtube.com/shorts/xHWHamkgG-g"/>
+  <published>2026-11-24T14:23:33+00:00</published>
+  <updated>2026-11-24T14:59:25+00:00</updated>
+  <media:group><media:community><media:statistics views="113"/></media:community></media:group>
+ </entry>
+</feed>
