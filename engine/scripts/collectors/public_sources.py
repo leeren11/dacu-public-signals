@@ -9,6 +9,7 @@ import html, json, logging, re, time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 from bs4 import BeautifulSoup
+from collectors.feed_honesty import classify_document
 from collectors.human_fetch import fetch_cffi, host_blocked, mark_backoff
 
 SH = timezone(timedelta(hours=8))
@@ -578,7 +579,23 @@ def load_reddit_sub(sub, *, fetch_json, fetch_old_rss, browsers_ok=True, browser
     pw_status = pw.get('http_status')
     if pw_status in (403, 429):
         mark_backoff(old_url, pw_status, 0)
-    usable = bool(body) and ('<entry' in body or '<item' in body) and not pw.get('error') and pw_status in (200, 201)
+    kind = classify_document(body, pw.get('content_type'))
+    if pw_status in (200, 201) and kind in ('auth_wall', 'html_not_feed', 'invalid_xml'):
+        reasons.append(
+            f'old.reddit.com HTTP {pw_status} is {kind}; missing, not an empty discussion and not zero'
+        )
+        data['error'] = kind
+        data['source_extra'] = '; '.join(reasons)
+        data['listing_url'] = old_url
+        data['content_type'] = pw.get('content_type')
+        return data
+    if pw_status in (200, 201) and kind in ('atom', 'rss') and '<entry' not in body and '<item' not in body:
+        reasons.append('old.reddit.com feed has no entry; empty_feed is missing, not zero posts')
+        data['error'] = 'empty_feed'
+        data['source_extra'] = '; '.join(reasons)
+        data['listing_url'] = old_url
+        return data
+    usable = bool(body) and kind in ('atom', 'rss', 'json') and ('<entry' in body or '<item' in body) and not pw.get('error') and pw_status in (200, 201)
     if usable:
         out = dict(pw)
         out['body'] = body
@@ -597,6 +614,9 @@ def parse_reddit_posts(data) -> list:
     if not _body_usable(data):
         return []
     body = unwrap_playwright_rss(data.get('body') or '')
+    kind = classify_document(body, data.get('content_type'))
+    if kind in ('auth_wall', 'html_not_feed', 'invalid_xml', 'empty_body'):
+        return []
     mode = data.get('reddit_mode') or ''
     posts = []
     if mode in ('rss', 'old_reddit_rss') or body.lstrip().startswith('<?xml') or '<feed' in body[:240] or '<rss' in body[:240]:

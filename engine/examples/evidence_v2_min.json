@@ -1,0 +1,531 @@
+{
+  "notice": "合成最小样例，不是生产观测，不能用来声称准确率、胜率或外推销售。v1 数字只是已公开 T1 的对照排版副本，不是新的冻结。",
+  "example_label": "SYNTHETIC_EXAMPLE_NOT_PRODUCTION",
+  "as_of": "2026-11-12T02:00:00+00:00",
+  "replay_cutoff": "2026-11-12T02:00:00+00:00",
+  "later_replay_cutoff": "2026-11-19T02:00:00+00:00",
+  "lookback_days": 7,
+  "v1_readonly": [
+    {
+      "entity_id": "holiday press-on nails",
+      "v1_score": 17.2,
+      "v1_rank": 1,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    },
+    {
+      "entity_id": "opal/birthstone/initial pendant (ready-stock)",
+      "v1_score": 16.2,
+      "v1_rank": 2,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    },
+    {
+      "entity_id": "layering/paperclip necklace set",
+      "v1_score": 16.0,
+      "v1_rank": 3,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    },
+    {
+      "entity_id": "friendship/beaded charm bracelet",
+      "v1_score": 16.0,
+      "v1_rank": 4,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    },
+    {
+      "entity_id": "gold medium/chunky hoop earrings",
+      "v1_score": 15.7,
+      "v1_rank": 5,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    },
+    {
+      "entity_id": "lip butter gift set",
+      "v1_score": 15.4,
+      "v1_rank": 6,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    },
+    {
+      "entity_id": "soft squishy multipack",
+      "v1_score": 13.4,
+      "v1_rank": 7,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    },
+    {
+      "entity_id": "matching family Christmas PJs flannel",
+      "v1_score": 12.6,
+      "v1_rank": 8,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    },
+    {
+      "entity_id": "cream/oatmeal oversized chunky knit",
+      "v1_score": 11.5,
+      "v1_rank": 9,
+      "v1_formula": "director_v1",
+      "note": "published T1 layout copy, not a new freeze"
+    }
+  ],
+  "series": [
+    {
+      "platform": "X",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "category_proxy",
+      "unit": "posts",
+      "cadence": "daily",
+      "source_note": "SYNTHETIC_EXAMPLE_NOT_PRODUCTION；不是生产观测。",
+      "days": [
+        {
+          "date": "2026-11-05",
+          "value": 10,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-06",
+          "value": 12,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-07",
+          "value": 11,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-08",
+          "value": 13,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-09",
+          "value": 14,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-10",
+          "value": 15,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-11",
+          "value": 18,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        }
+      ]
+    },
+    {
+      "platform": "X",
+      "metric_key": "squishy_plush_gift_posts",
+      "entity_kind": "category_proxy",
+      "unit": "posts",
+      "cadence": "daily",
+      "source_note": "SYNTHETIC_EXAMPLE_NOT_PRODUCTION；不是生产观测。",
+      "days": [
+        {
+          "date": "2026-11-05",
+          "value": 10,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-06",
+          "value": 10,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-07",
+          "value": 10,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-08",
+          "value": 10,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-09",
+          "value": 10,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-10",
+          "value": 10,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-11",
+          "value": 10,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        }
+      ]
+    },
+    {
+      "platform": "X",
+      "metric_key": "jewelry_gift_posts",
+      "entity_kind": "category_proxy",
+      "unit": "posts",
+      "cadence": "daily",
+      "source_note": "SYNTHETIC_EXAMPLE_NOT_PRODUCTION；不是生产观测。",
+      "days": [
+        {
+          "date": "2026-11-05",
+          "value": 20,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-06",
+          "value": 20,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-07",
+          "value": 20,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-08",
+          "value": 8888,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": null,
+          "source_url": "example://synthetic/not-a-real-source",
+          "source_note": "有采集时点但没有可证明的 available_at，必须 pending。"
+        },
+        {
+          "date": "2026-11-09",
+          "value": 20,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-10",
+          "value": 20,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-11",
+          "value": 20,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        }
+      ]
+    },
+    {
+      "platform": "X",
+      "metric_key": "fashion_gift_posts",
+      "entity_kind": "category_proxy",
+      "unit": "posts",
+      "cadence": "daily",
+      "source_note": "SYNTHETIC_EXAMPLE_NOT_PRODUCTION；不是生产观测。",
+      "days": [
+        {
+          "date": "2026-11-05",
+          "value": 15,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-06",
+          "value": 15,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-07",
+          "value": 15,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-08",
+          "value": 15,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-09",
+          "value": 9999,
+          "status": "partial",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source",
+          "is_partial": 1,
+          "source_note": "未结束的 partial 桶，不能进入日频动量。"
+        },
+        {
+          "date": "2026-11-10",
+          "value": 15,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        },
+        {
+          "date": "2026-11-11",
+          "value": 15,
+          "status": "observed",
+          "collected_at": "2026-11-12T01:40:00+00:00",
+          "available_at": "2026-11-12T01:40:00+00:00",
+          "source_url": "example://synthetic/not-a-real-source"
+        }
+      ]
+    }
+  ],
+  "extra_observations": [
+    {
+      "platform": "X",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "category_proxy",
+      "entity_id": "nail_makeup_gift_posts",
+      "unit": "posts",
+      "cadence": "daily",
+      "status": "observed",
+      "value": 16,
+      "is_partial": 0,
+      "observed_start": "2026-11-11T00:00:00+00:00",
+      "observed_end": "2026-11-12T00:00:00+00:00",
+      "published_at": null,
+      "collected_at": "2026-11-19T01:00:00+00:00",
+      "available_at": "2026-11-19T01:00:00+00:00",
+      "source_url": "example://synthetic/late-revision",
+      "source_note": "同一 11-11 桶的晚到修订。11-12 截止不可见，不得回写首评。"
+    },
+    {
+      "platform": "X",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "category_proxy",
+      "entity_id": "nail_makeup_gift_posts",
+      "unit": "posts",
+      "cadence": "daily",
+      "status": "observed",
+      "value": 999,
+      "is_partial": 0,
+      "observed_start": "2026-11-12T00:00:00+00:00",
+      "observed_end": "2026-11-13T00:00:00+00:00",
+      "collected_at": "2026-11-12T01:40:00+00:00",
+      "available_at": "2026-11-12T01:40:00+00:00",
+      "source_url": "example://synthetic/open-bucket",
+      "source_note": "截至 11-12 02:00Z 仍未结束的桶，不能进入该次窗口。"
+    },
+    {
+      "platform": "YouTube",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "category_proxy",
+      "entity_id": "nail_makeup_gift_posts",
+      "unit": "cumulative_views_snapshot",
+      "cadence": "daily",
+      "status": "observed",
+      "value": 500,
+      "is_partial": 0,
+      "observed_start": "2026-11-11T00:00:00+00:00",
+      "observed_end": "2026-11-12T00:00:00+00:00",
+      "collected_at": "2026-11-12T01:40:00+00:00",
+      "available_at": "2026-11-12T01:40:00+00:00",
+      "source_url": "example://synthetic/youtube-snapshot",
+      "source_note": "即使请求标成 daily，适配器仍是快照，不能进入日频动量。"
+    },
+    {
+      "platform": "TikTok",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "category_proxy",
+      "entity_id": "nail_makeup_gift_posts",
+      "unit": "monthly_background",
+      "cadence": "monthly",
+      "status": "monthly_background",
+      "value": 3,
+      "is_partial": 0,
+      "observed_start": "2026-08-01T00:00:00+00:00",
+      "observed_end": "2026-09-01T00:00:00+00:00",
+      "collected_at": "2026-11-12T01:40:00+00:00",
+      "available_at": "2026-11-12T01:40:00+00:00",
+      "source_url": "example://synthetic/tiktok-monthly",
+      "source_note": "月度背景，不是 11 月日频。"
+    },
+    {
+      "platform": "GoogleTrends",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "category_proxy",
+      "entity_id": "nail_makeup_gift_posts",
+      "unit": "anchor_ratio",
+      "cadence": "daily",
+      "status": "observed",
+      "value": 500,
+      "is_partial": 0,
+      "observed_start": "2026-11-11T00:00:00+00:00",
+      "observed_end": "2026-11-12T00:00:00+00:00",
+      "collected_at": "2026-11-12T01:40:00+00:00",
+      "available_at": "2026-11-12T01:40:00+00:00",
+      "source_url": "example://synthetic/trends-ratio",
+      "source_note": "锚点比值，不是第二条帖量序列，不能解除 single-source。"
+    },
+    {
+      "platform": "Meta",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "category_proxy",
+      "entity_id": "nail_makeup_gift_posts",
+      "unit": "ads",
+      "cadence": "unavailable",
+      "status": "missing",
+      "value": null,
+      "is_partial": 0,
+      "source_url": "example://synthetic/meta-403",
+      "source_note": "HTTP 403，缺失不是 0。"
+    },
+    {
+      "platform": "Meta",
+      "metric_key": "jewelry_gift_posts",
+      "entity_kind": "category_proxy",
+      "entity_id": "jewelry_gift_posts",
+      "unit": "ads",
+      "cadence": "daily",
+      "status": "observed",
+      "value": 0,
+      "is_partial": 0,
+      "observed_start": "2026-11-11T00:00:00+00:00",
+      "observed_end": "2026-11-12T00:00:00+00:00",
+      "collected_at": "2026-11-12T01:40:00+00:00",
+      "available_at": "2026-11-12T01:40:00+00:00",
+      "source_url": "example://synthetic/meta-zero",
+      "source_note": "无官方日频；这里的 0 也不能当成投放为 0 或需求为 0。"
+    },
+    {
+      "platform": "Reddit",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "category_proxy",
+      "entity_id": "nail_makeup_gift_posts",
+      "unit": "posts",
+      "cadence": "unavailable",
+      "status": "missing",
+      "value": null,
+      "is_partial": 0,
+      "source_url": "example://synthetic/reddit-403",
+      "source_note": "HTTP 403，缺失不是 0 差评。"
+    },
+    {
+      "platform": "X",
+      "metric_key": "bfcm_posts",
+      "entity_kind": "macro",
+      "entity_id": "bfcm_posts",
+      "unit": "posts",
+      "cadence": "daily",
+      "status": "observed",
+      "value": 100,
+      "is_partial": 0,
+      "observed_start": "2026-11-11T00:00:00+00:00",
+      "observed_end": "2026-11-12T00:00:00+00:00",
+      "collected_at": "2026-11-12T01:40:00+00:00",
+      "available_at": "2026-11-12",
+      "source_url": "example://synthetic/date-only",
+      "source_note": "只有日期、没有时分秒的 available_at，不能证明截止前可用。"
+    },
+    {
+      "platform": "X",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "item",
+      "entity_id": "example-item-x",
+      "unit": "post",
+      "cadence": "daily",
+      "status": "observed",
+      "value": 3,
+      "is_partial": 0,
+      "observed_start": "2026-11-11T00:00:00+00:00",
+      "observed_end": "2026-11-12T00:00:00+00:00",
+      "collected_at": "2026-11-12T01:40:00+00:00",
+      "available_at": "2026-11-12T01:40:00+00:00",
+      "text": "holiday press on nails gift idea",
+      "engagement": {
+        "likes": null,
+        "reposts": 2,
+        "rank": 1
+      },
+      "source_url": "example://synthetic/item-x",
+      "source_note": "单帖示例。likes 缺失保持 null，rank 不可与计数相加。"
+    },
+    {
+      "platform": "YouTube",
+      "metric_key": "nail_makeup_gift_posts",
+      "entity_kind": "item",
+      "entity_id": "example-item-yt",
+      "unit": "post",
+      "cadence": "snapshot",
+      "status": "snapshot",
+      "value": 9,
+      "is_partial": 0,
+      "observed_start": "2026-11-11T00:00:00+00:00",
+      "observed_end": "2026-11-12T00:00:00+00:00",
+      "collected_at": "2026-11-12T01:40:00+00:00",
+      "available_at": "2026-11-12T01:40:00+00:00",
+      "text": "holiday press on nails gift idea",
+      "source_url": "example://synthetic/item-yt",
+      "source_note": "跨平台近重复。保留两条，不把 3 和 9 相加。"
+    }
+  ]
+}

@@ -48,3 +48,13 @@ US Keepa 名次、价格和评论计数的证据表，不改 T0/T1，也不改 1
 ## 采集能力事实（见 reports/ANTIBOT_V1_HANDOFF.md 最新实测）
 采集已切换拟人浏览器架构。成功源写入有数值；403/429/空壳仍 NULL+原因，不编量。
 Live 仍可能以 X + 稀疏跨平台 + 分析师先验为主；**不声称全平台日频共振**，除非 Cross-Platform Summary「有数值」列对应该平台真正亮起。
+
+## 证据研究 v2（shadow，未接入本入口）
+
+`evidence_research_v2.1.0` / `shadow_demand_v2` 是并行证据层，不修改 `director_v1`、T0/T1、walk-forward 或本文件描述的日更顺序。证据不足时分数为 pending，`source_coverage` 不是预测概率，也不表示准确率提升。说明、回滚和与生产脚本的差异见 `docs/evidence_research_v2_zh.md`。样例必须带 `SYNTHETIC_EXAMPLE_NOT_PRODUCTION`。
+
+```bash
+python3 scripts/evidence_v2_cli.py run --db /tmp/evidence_v2_example.sqlite --fixture examples/evidence_v2_min.json
+```
+
+`youtube_official_feed_v1` 是另一条未接入日更的官方 Atom shadow。它不给 SKU 覆盖，也不把累计 views 当成日播放。条款、安装和 7 个日更周期的验收见 `docs/youtube_official_feed_v1_zh.md`。

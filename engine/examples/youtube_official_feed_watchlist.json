@@ -1,0 +1,18 @@
+{
+  "example_label": "PUBLIC_FEED_EXCERPT_NOT_PRODUCTION",
+  "watchlist_version": "2026-11-25-shadow-review",
+  "notice": "复核候选，不是生产覆盖，也不把品牌自营内容当成独立需求。",
+  "channels": [
+    {
+      "channel_id": "UCp7db2pxQKGH1mI7D_Jxedg",
+      "handle": "EBANKUnail_official",
+      "scope": "brand_supply_proxy",
+      "business_role": "not_independent_demand",
+      "maps_to_sku": 0,
+      "provenance_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCp7db2pxQKGH1mI7D_Jxedg",
+      "approved_at": "2026-11-25T16:00:00+00:00",
+      "included_from": "2026-11-25 handoff review; shadow only; not SKU coverage",
+      "status": "approved_shadow_only"
+    }
+  ]
+}

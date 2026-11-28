@@ -9,5 +9,6 @@ __pycache__/
 *.sqlite.sha256
 *.sqlite.bak-*
 db/backups/
+youtube_feed_archive/
 *.keepa.json
 *.keepa.jsonl

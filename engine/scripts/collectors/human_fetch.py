@@ -52,32 +52,33 @@ def _cache_key(url: str, tag: str = '') -> str:
     return hashlib.sha256((tag + '|' + url).encode()).hexdigest()[:24]
 
 
-def read_good_cache(url: str, tag: str = '') -> dict | None:
-    path = CACHE / f'{_cache_key(url, tag)}.json'
-    if not path.exists():
+def read_good_cache(url: str, tag: str = '', cache_dir: Path | None = None) -> dict | None:
+    from collectors.archive import classify_cache_file
+
+    directory = Path(cache_dir) if cache_dir is not None else CACHE
+    path = directory / f'{_cache_key(url, tag)}.json'
+    classified = classify_cache_file(path)
+    if not classified.get('valid_source'):
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding='utf-8'))
     except (ValueError, OSError):
         return None
-    if data.get('http_status') in (200, 201) and data.get('body'):
-        return data
-    return None
+    return data if isinstance(data, dict) else None
 
 
-def write_cache(url: str, data: dict, tag: str = '') -> Path:
-    CACHE.mkdir(parents=True, exist_ok=True)
-    RAW.mkdir(parents=True, exist_ok=True)
+def write_cache(url: str, data: dict, tag: str = '', cache_dir: Path | None = None, raw_dir: Path | None = None) -> Path:
+    from collectors.archive import build_cache_payload, pointer_manifest, write_json_atomic
+
+    cache = Path(cache_dir) if cache_dir is not None else CACHE
+    raw_root = Path(raw_dir) if raw_dir is not None else RAW
     key = _cache_key(url, tag)
-    path = CACHE / f'{key}.json'
-    path.write_text(json.dumps(data, ensure_ascii=False)[:2_000_000])
-    # Evidence dump (truncated) for audit; not stamped to GitHub.
-    raw = RAW / f'{datetime.now(SH).date().isoformat()}_{key[:20]}.json'
-    slim = dict(data)
-    body = slim.get('body') or ''
-    if len(body) > 80_000:
-        slim['body'] = body[:80_000] + '\n/* truncated */'
-    raw.write_text(json.dumps(slim, ensure_ascii=False))
+    path = cache / f'{key}.json'
+    payload = build_cache_payload(data)
+    write_json_atomic(path, payload)
+    # Pointer only. The raw file does not embed a sliced body.
+    raw = raw_root / f'{datetime.now(SH).date().isoformat()}_{key[:20]}.json'
+    write_json_atomic(raw, pointer_manifest(payload, path.name))
     return path
 
 

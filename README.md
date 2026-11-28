@@ -4,7 +4,7 @@
 
 - `daily/`：11/03–11/06已重绘，含完整UTC桶、跨平台明细和T0 vs Live五维排名。
 - `reports/`：同一Markdown源渲染PDF，颗粒度一致，中文/English独立列。
-- `engine/`：本窗本地可复用的采集/迁移/五维评分/导出/冻结/回测源代码与配置。运行时根目录为/workspace/dacu-signal。
+- `engine/`：本窗本地可复用的采集/迁移/五维评分/导出/冻结/回测源代码与配置。运行时根目录为/workspace/dacu-signal。另有未接入日更的 `evidence_research_v2.1.0` 影子证据层，见 `engine/docs/evidence_research_v2_zh.md`；它不改 T0/T1，也不表示准确率提升。
 - `walk-forward/`：评估日 2026-11-12 与 2026-12-01 的公开回看（逐日爬坡 MD + JSON）。提交说明 `walkforward: YYYY-MM-DD`。
 - `freeze/T0_2026-11-02_top9.md`：原软冻结基准。11/08才运行T1硬冻结，未提前生成。
 
